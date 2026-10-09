@@ -1,0 +1,12 @@
+services:
+  agent-colab:
+    build: .
+    ports:
+      - "8787:8787"
+    environment:
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?Set ADMIN_TOKEN}
+      DATA_FILE: /app/data/state.json
+    volumes:
+      - agent_colab_data:/app/data
+volumes:
+  agent_colab_data:
