@@ -54,7 +54,11 @@ test("REST validation, read-only/cross-project scope, atomic concurrent claims, 
       await f.req("/api/projects", secret, { name: "Other", goal: "Private" })
     ).data;
     const invite = (name: string, role = "contributor") =>
-      f.req(`/api/projects/${p.id}/join`, secret, { name, role });
+      f.req(`/api/projects/${p.id}/join`, secret, {
+        name,
+        role,
+        participantName: name,
+      });
     const a = (await invite("A")).data,
       b = (await invite("B")).data,
       reader = (await invite("R", "reader")).data;
@@ -128,7 +132,12 @@ test("real SDK Streamable HTTP initialize, tools, resources, permissions and ful
     const agents = await Promise.all(
       ["A", "B", "C"].map(
         async (name) =>
-          (await f.req(`/api/projects/${p.id}/join`, secret, { name })).data,
+          (
+            await f.req(`/api/projects/${p.id}/join`, secret, {
+              name,
+              participantName: name,
+            })
+          ).data,
       ),
     );
     for (const a of agents) {
@@ -249,7 +258,7 @@ test("durable restart, WAL, hashed tokens, encrypted idempotency cache", () => {
     c.createProject(admin, { name: "Persistent", goal: "Restart" }),
   );
   const a = c.write(admin, "a", "a", {}, () =>
-    c.join(admin, p.id, { name: "Agent" }),
+    c.join(admin, p.id, { name: "Agent", participantName: "Agent human" }),
   );
   assert.equal(c.db.pragma("journal_mode", { simple: true }), "wal");
   const raw =
@@ -274,7 +283,10 @@ test("authenticated SSE emits durable writes and closes after token revocation",
       })
     ).data;
     const a = (
-      await f.req(`/api/projects/${p.id}/join`, secret, { name: "Agent" })
+      await f.req(`/api/projects/${p.id}/join`, secret, {
+        name: "Agent",
+        participantName: "Agent human",
+      })
     ).data;
     const events = (await f.req(`/api/projects/${p.id}/events`)).data;
     const after = events.at(-1).sequence;

@@ -51,11 +51,19 @@ test("legacy import preserves artifacts and audit reviews without reviving token
     const c = new Colab(target, "admin-secret");
     assert.equal(c.get("projects", p).public, false);
     assert.equal(c.get("findings", f).status, "proposed");
+    assert.equal(c.agents(c.authenticate("admin-secret"), p)[0].id, a);
     assert.equal(c.get("findings", f).evidence[0].description, "Legacy log");
     assert.equal(c.db.prepare("SELECT * FROM credentials").all().length, 0);
     assert.throws(() => c.authenticate("legacy-token"));
     const events = c.events(c.authenticate("admin-secret"), p, {});
-    assert.equal(events[0].detail.reviews.length, 1);
+    assert.equal(
+      events.find((e) => e.type === "legacy.imported")!.detail.reviewCount,
+      1,
+    );
+    assert.equal(
+      events.find((e) => e.type === "legacy.reviewed")!.detail.review.vote,
+      "approve",
+    );
     assert.equal(readFileSync(source, "utf8"), original);
     c.close();
     assert.throws(() =>

@@ -239,7 +239,14 @@ export class Colab {
     const b = joinSchema.parse(input),
       p = this.get("projects", projectId);
     let participantId = b.participantId;
-    if (b.role === "owner" && !participantId) participantId = p.ownerId;
+    if (!participantId && !b.participantName && b.role !== "owner")
+      throw new AppError(
+        400,
+        "PARTICIPANT_REQUIRED",
+        "Specify an existing participantId or an explicit new-human participantName; agent names do not create voter identities",
+      );
+    if (b.role === "owner" && !participantId && !b.participantName)
+      participantId = p.ownerId;
     if (!participantId) {
       participantId = randomUUID();
       this.db.prepare("INSERT INTO participants VALUES(?,?)").run(
@@ -749,25 +756,37 @@ export class Colab {
     this.expire(projectId);
     return this.db
       .prepare(
-        "SELECT a.data,m.role,p.data participant FROM agents a JOIN participants p ON p.id=a.participant_id JOIN memberships m ON m.participant_id=a.participant_id WHERE m.project_id=? LIMIT 100",
+        "SELECT a.data,m.role,p.data participant FROM agents a JOIN participants p ON p.id=a.participant_id JOIN memberships m ON m.participant_id=a.participant_id WHERE m.project_id=? AND (EXISTS (SELECT 1 FROM credentials cr WHERE cr.agent_id=a.id AND cr.project_id=m.project_id) OR json_extract(a.data,'$.legacyProjectId')=m.project_id) LIMIT 100",
       )
       .all(projectId)
       .map((r: any) => {
         const a = parse(r);
         const leases = this.db
           .prepare(
-            "SELECT l.data,t.data task FROM leases l JOIN tasks t ON t.id=l.task_id WHERE l.agent_id=? AND t.project_id=?",
+            "SELECT l.data,t.data task FROM leases l JOIN tasks t ON t.id=l.task_id WHERE l.agent_id=? AND t.project_id=? ORDER BY l.expires_at LIMIT 10",
           )
           .all(a.id, projectId)
           .map((x: any) => ({
             ...JSON.parse(x.data),
-            task: JSON.parse(x.task),
+            task: ((t: RecordData) => ({
+              id: t.id,
+              title: t.title,
+              status: t.status,
+            }))(JSON.parse(x.task)),
           }));
         return {
           ...a,
           participant: JSON.parse(r.participant),
           role: r.role,
           leases,
+          leaseCount: (
+            this.db
+              .prepare(
+                "SELECT count(*) n FROM leases l JOIN tasks t ON t.id=l.task_id WHERE l.agent_id=? AND t.project_id=?",
+              )
+              .get(a.id, projectId) as any
+          ).n,
+          leaseDetailsLimit: 10,
           activity:
             a.lastActive && this.now() - Date.parse(a.lastActive) < 300000
               ? "recently_active"

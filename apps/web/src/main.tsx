@@ -181,6 +181,7 @@ function App() {
           id="project"
           value={id}
           onChange={(e) => {
+            setProject(null);
             setId(e.target.value);
             history.replaceState(null, "", "/p/" + e.target.value);
           }}
@@ -239,6 +240,7 @@ function App() {
           />
           <button
             onClick={() => {
+              setProject(null);
               setToken(draftToken);
               setDraftToken("");
               setNotice("Credential set for this tab.");
@@ -250,6 +252,9 @@ function App() {
             <button
               className="secondary"
               onClick={() => {
+                setProject(null);
+                setDetail(null);
+                setCredentials([]);
                 setToken("");
                 setDraftToken("");
                 setInvite(null);
@@ -896,7 +901,7 @@ function App() {
                           setInvite(
                             await request(`/api/projects/${id}/join`, {
                               name: v.name,
-                              participantName: v.participantName,
+                              participantName: v.participantName || undefined,
                               participantId: v.participantId || undefined,
                               agentId: v.agentId || undefined,
                               harness: v.harness,
@@ -918,7 +923,7 @@ function App() {
                       <input
                         name="participantName"
                         aria-label="Participant name"
-                        placeholder="Participant name"
+                        placeholder="New human name (or reuse Participant ID below)"
                       />
                       <input
                         name="participantId"

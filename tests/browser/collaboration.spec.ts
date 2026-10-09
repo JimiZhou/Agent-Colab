@@ -30,6 +30,7 @@ test("new user follows share URL, sees real three-client consensus and complete 
     agents.push(
       await post(`/api/projects/${p.id}/join`, {
         name,
+        participantName: name,
         harness: "deterministic-client",
       }),
     );
@@ -150,6 +151,7 @@ test("browser credential enables tasks, readonly denial and private disconnect c
   });
   const reader = await post(`/api/projects/${p.id}/join`, {
     name: "Reader",
+    participantName: "Reader human",
     role: "reader",
   });
   await page.goto("/p/" + p.id);
@@ -245,4 +247,24 @@ test("owner updates real summary, creates and operates a lease, links GitHub cod
   await expect(page.getByRole("status")).toContainText("Saved");
   await task.getByRole("button", { name: "release", exact: true }).click();
   await expect(task).toContainText("open");
+  await page
+    .getByRole("button", { name: "Join & access", exact: true })
+    .click();
+  await page
+    .getByLabel("Agent name", { exact: true })
+    .fill("Second owner agent");
+  await page.getByLabel("Access role", { exact: true }).selectOption("owner");
+  await page
+    .getByRole("button", { name: "Issue credential", exact: true })
+    .click();
+  await expect(
+    page.getByText("Credential — deliver securely", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Participant: " + p.ownerId, { exact: true }),
+  ).toBeVisible();
+  const credentials = await request.get(`/api/projects/${p.id}/credentials`, {
+    headers: { Authorization: "Bearer " + owner.token },
+  });
+  expect((await credentials.json()).length).toBe(2);
 });

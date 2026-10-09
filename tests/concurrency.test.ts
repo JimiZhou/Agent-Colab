@@ -14,7 +14,9 @@ test("two independent processes claim the same SQLite task: exactly one wins", a
     c.createProject(admin, { name: "Race", goal: "Atomic claims" }),
   );
   const agents = ["A", "B"].map((name) =>
-    c.write(admin, name, "join", { name }, () => c.join(admin, p.id, { name })),
+    c.write(admin, name, "join", { name }, () =>
+      c.join(admin, p.id, { name, participantName: name }),
+    ),
   );
   const t = c.write(admin, "task", "task", {}, () =>
     c.task(admin, p.id, { title: "Exclusive" }),

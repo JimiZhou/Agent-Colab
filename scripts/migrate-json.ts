@@ -79,6 +79,7 @@ c.db
             participantId,
             name: a.name,
             harness: "legacy",
+            legacyProjectId: p.id,
             createdAt: a.createdAt,
             lastActive: null,
           }),
@@ -143,12 +144,18 @@ c.db
           .prepare("INSERT INTO events(id,project_id,data) VALUES(?,?,?)")
           .run(e.id, p.id, JSON.stringify(e));
       // Historical reviews are retained as audit data, not counted as independent votes.
+      const reviews = (legacy.reviews || []).filter(
+        (r: any) => r.projectId === p.id,
+      );
+      for (const review of reviews)
+        c.event(p.id, admin, "legacy.reviewed", {
+          review,
+          countsTowardConsensus: false,
+        });
       c.event(p.id, admin, "legacy.imported", {
-        reviews: (legacy.reviews || []).filter(
-          (r: any) => r.projectId === p.id,
-        ),
+        reviewCount: reviews.length,
         credentialsInvalidated: true,
-        identityReconciliationRequired: true,
+        identityReconciliationRequired: !identityFile,
       });
     }
   })

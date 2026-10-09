@@ -9,7 +9,7 @@ test("SQLite project, identities, permissions, idempotency and credential revoca
   );
   assert.equal(p.public, false);
   const invite = c.write(admin, "join", "join", {}, () =>
-    c.join(admin, p.id, { name: "A" }),
+    c.join(admin, p.id, { name: "A", participantName: "A human" }),
   );
   const a = c.authenticate(invite.token);
   assert.equal(a.participantId, invite.agent.participantId);
@@ -39,7 +39,14 @@ test("lease conflict, expiry, submission and participant-aware community recogni
     }),
   );
   const join = (key: string, b: any) =>
-    c.write(admin, key, "join", b, () => c.join(admin, p.id, b));
+    c.write(admin, key, "join", b, () =>
+      c.join(admin, p.id, {
+        ...b,
+        ...(!b.participantId && b.role !== "owner"
+          ? { participantName: b.name }
+          : {}),
+      }),
+    );
   const A = join("a", { name: "A" }),
     B = join("b", { name: "B" }),
     C = join("c", { name: "C" }),
@@ -103,7 +110,14 @@ test("owner-led authorization, dispute/revocation, role changes, expiry and depe
     c.createProject(admin, { name: "Owner", goal: "Research" }),
   );
   const reg = (key: string, b: any) =>
-    c.write(admin, key, "join", b, () => c.join(admin, p.id, b));
+    c.write(admin, key, "join", b, () =>
+      c.join(admin, p.id, {
+        ...b,
+        ...(!b.participantId && b.role !== "owner"
+          ? { participantName: b.name }
+          : {}),
+      }),
+    );
   const A = reg("a", { name: "A" }),
     B = reg("b", { name: "B" }),
     R = reg("r", { name: "Reviewer", role: "reviewer", expiresIn: 60 });
@@ -169,7 +183,7 @@ test("owners cannot link another project identity; administrator can reuse agent
       c.createProject(admin, { name: "B", goal: "B" }),
     );
   const a = c.write(admin, "a", "a", {}, () =>
-    c.join(admin, p.id, { name: "Agent A" }),
+    c.join(admin, p.id, { name: "Agent A", participantName: "Agent A human" }),
   );
   const o = c.write(admin, "o", "o", {}, () =>
     c.join(admin, q.id, { name: "Owner B", role: "owner" }),
@@ -214,6 +228,94 @@ test("partial context updates preserve public sharing, stage and immutable gover
   assert.throws(() =>
     c.write(admin, "policy", "update", {}, () =>
       c.patchProject(admin, p.id, { mode: "owner" }),
+    ),
+  );
+  c.close();
+});
+test("agent metadata stays project-local and active lease summaries are bounded", () => {
+  const c = new Colab(":memory:", "secret");
+  const p = c.write(admin, "p", "p", {}, () =>
+      c.createProject(admin, { name: "Private", goal: "Private" }),
+    ),
+    q = c.write(admin, "q", "q", {}, () =>
+      c.createProject(admin, { name: "Public", goal: "Public", public: true }),
+    );
+  const a = c.write(admin, "a", "a", {}, () =>
+    c.join(admin, p.id, {
+      name: "Private harness",
+      participantName: "Private human",
+      model: "private-model",
+    }),
+  );
+  const b = c.write(admin, "b", "b", {}, () =>
+    c.join(admin, q.id, {
+      name: "Public harness",
+      participantId: a.agent.participantId,
+    }),
+  );
+  assert.deepEqual(
+    c.agents(undefined, q.id).map((x) => x.id),
+    [b.agent.id],
+  );
+  assert.deepEqual(
+    c.agents(admin, p.id).map((x) => x.id),
+    [a.agent.id],
+  );
+  const actor = c.authenticate(a.token);
+  for (let i = 0; i < 11; i++) {
+    const t = c.write(actor, "t" + i, "task", {}, () =>
+      c.task(actor, p.id, {
+        title: "Task " + i,
+        description: "Large description".repeat(100),
+      }),
+    );
+    c.write(actor, "claim" + i, "claim", {}, () =>
+      c.taskAction(actor, p.id, t.id, "claim"),
+    );
+  }
+  const status = c.agents(actor, p.id)[0];
+  assert.equal(status.leases.length, 10);
+  assert.equal(status.leaseCount, 11);
+  assert.equal(status.leases[0].task.description, undefined);
+  c.close();
+});
+test("agent names never automatically mint independent participant votes", () => {
+  const c = new Colab(":memory:", "secret");
+  const p = c.write(admin, "p", "p", {}, () =>
+    c.createProject(admin, { name: "Identity", goal: "Explicit identities" }),
+  );
+  assert.throws(() =>
+    c.write(admin, "ambiguous", "join", {}, () =>
+      c.join(admin, p.id, { name: "Just an agent" }),
+    ),
+  );
+  const a = c.write(admin, "a", "join", {}, () =>
+      c.join(admin, p.id, { name: "Owner A", role: "owner" }),
+    ),
+    b = c.write(admin, "b", "join", {}, () =>
+      c.join(admin, p.id, { name: "Owner B", role: "owner" }),
+    );
+  assert.equal(a.agent.participantId, b.agent.participantId);
+  const author = c.authenticate(a.token),
+    reviewer = c.authenticate(b.token);
+  const f = c.write(author, "f", "finding", {}, () =>
+    c.finding(author, p.id, {
+      title: "Claim",
+      summary: "Summary",
+      direction: "Identity",
+      method: "Experiment",
+      evidence: [{ description: "Log" }],
+      reproduction: "Run it",
+    }),
+  );
+  assert.throws(() =>
+    c.write(reviewer, "review", "review", {}, () =>
+      c.review(reviewer, p.id, {
+        findingId: f.id,
+        vote: "approve",
+        environment: "Node",
+        evidence: "Claimed success",
+      }),
     ),
   );
   c.close();
