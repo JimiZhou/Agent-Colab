@@ -35,6 +35,7 @@ function App() {
       body?: unknown,
       method = body === undefined ? "GET" : "POST",
     ) => {
+      const scopeAtStart = currentScope.current;
       const r = await fetch(path, {
         method,
         headers: {
@@ -49,6 +50,11 @@ function App() {
         body: body === undefined ? undefined : JSON.stringify(body),
       });
       const data = await r.json();
+      if (
+        scopeAtStart.token !== currentScope.current.token ||
+        scopeAtStart.id !== currentScope.current.id
+      )
+        throw Error("Request cancelled after workspace changed");
       if (!r.ok) throw Error(data.error?.message || "Request failed");
       return data;
     },

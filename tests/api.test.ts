@@ -262,3 +262,51 @@ test("durable restart, WAL, hashed tokens, encrypted idempotency cache", () => {
   c.close();
   rmSync(dir, { recursive: true });
 });
+test("authenticated SSE emits durable writes and closes after token revocation", async () => {
+  const f = await fixture();
+  const abort = new AbortController();
+  const timeout = setTimeout(() => abort.abort(), 8000);
+  try {
+    const p = (
+      await f.req("/api/projects", secret, {
+        name: "Events",
+        goal: "Durable event stream",
+      })
+    ).data;
+    const a = (
+      await f.req(`/api/projects/${p.id}/join`, secret, { name: "Agent" })
+    ).data;
+    const events = (await f.req(`/api/projects/${p.id}/events`)).data;
+    const after = events.at(-1).sequence;
+    const response = await fetch(
+      f.base + `/api/projects/${p.id}/events/stream?after=${after}`,
+      { headers: { Authorization: "Bearer " + a.token }, signal: abort.signal },
+    );
+    assert.match(
+      response.headers.get("content-type") || "",
+      /^text\/event-stream/,
+    );
+    const reader = response.body!.getReader();
+    await reader.read();
+    await f.req(`/api/projects/${p.id}/tasks`, a.token, {
+      title: "Event task",
+    });
+    const chunk = await reader.read();
+    assert.match(new TextDecoder().decode(chunk.value), /task.created/);
+    await f.req(
+      `/api/projects/${p.id}/credentials/${a.credential.id}/revoke`,
+      secret,
+      {},
+    );
+    let done = false;
+    while (!done) {
+      const result = await reader.read();
+      done = result.done;
+    }
+    assert.equal(done, true);
+  } finally {
+    clearTimeout(timeout);
+    abort.abort();
+    f.close();
+  }
+});

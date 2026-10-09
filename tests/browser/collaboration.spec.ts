@@ -173,3 +173,76 @@ test("browser credential enables tasks, readonly denial and private disconnect c
   ).not.toBeVisible();
   expect(await page.evaluate(() => localStorage.length)).toBe(0);
 });
+test("owner updates real summary, creates and operates a lease, links GitHub code", async ({
+  page,
+  request,
+}) => {
+  const post = async (path: string, data: any) => {
+    const r = await request.post(path, {
+      headers: {
+        Authorization: "Bearer " + admin,
+        "Idempotency-Key": crypto.randomUUID(),
+      },
+      data,
+    });
+    expect(r.ok()).toBeTruthy();
+    return r.json();
+  };
+  const p = await post("/api/projects", {
+    name: "Owner console",
+    goal: "Operate shared state",
+    mode: "community",
+    public: true,
+  });
+  const owner = await post(`/api/projects/${p.id}/join`, {
+    name: "Owner agent",
+    role: "owner",
+  });
+  await page.goto("/p/" + p.id);
+  await page
+    .getByLabel("Project credential", { exact: true })
+    .fill(owner.token);
+  await page.getByRole("button", { name: "Connect", exact: true }).click();
+  await expect(page.getByRole("heading", { name: p.goal })).toBeVisible();
+  await page
+    .getByLabel("Latest summary", { exact: true })
+    .fill("Owner published current progress");
+  await page.getByLabel("Current stage", { exact: true }).fill("Verification");
+  await page
+    .getByRole("button", { name: "Save context (owner)", exact: true })
+    .click();
+  await expect(
+    page.locator("p").filter({ hasText: /^Owner published current progress$/ }),
+  ).toBeVisible();
+  await expect(page.getByText("Public sharing", { exact: true })).toBeVisible();
+  await page
+    .getByLabel("GitHub repository", { exact: true })
+    .fill("https://github.com/JimiZhou/Agent-Colab");
+  await page
+    .getByLabel("Commit SHA", { exact: true })
+    .fill("76778d7ac03fb74b24cd01829960fc85429b6698");
+  await page
+    .getByRole("button", { name: "Link repository (owner)", exact: true })
+    .click();
+  await expect(
+    page.getByRole("link", { name: "Commit 76778d7a" }),
+  ).toHaveAttribute(
+    "href",
+    "https://github.com/JimiZhou/Agent-Colab/commit/76778d7ac03fb74b24cd01829960fc85429b6698",
+  );
+  await page.getByRole("button", { name: "Tasks", exact: true }).click();
+  await page.getByLabel("Task title", { exact: true }).fill("Owner task");
+  await page.getByRole("button", { name: "Create task", exact: true }).click();
+  const task = page
+    .locator("article.item")
+    .filter({ has: page.getByRole("heading", { name: /Owner task/ }) });
+  await expect(task).toContainText("open");
+  await task.getByRole("button", { name: "claim", exact: true }).click();
+  await expect(task).toContainText("claimed");
+  await task.getByRole("button", { name: "start", exact: true }).click();
+  await expect(task).toContainText("in_progress");
+  await task.getByRole("button", { name: "heartbeat", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("Saved");
+  await task.getByRole("button", { name: "release", exact: true }).click();
+  await expect(task).toContainText("open");
+});

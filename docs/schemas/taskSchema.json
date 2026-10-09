@@ -2,16 +2,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "properties": {
-    "title": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 200
-    },
-    "description": {
-      "default": "",
-      "type": "string",
-      "maxLength": 8000
-    },
+    "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "description": { "default": "", "type": "string", "maxLength": 8000 },
     "dependencies": {
       "default": [],
       "maxItems": 20,

@@ -69,3 +69,72 @@ test("legacy import preserves artifacts and audit reviews without reviving token
     rmSync(dir, { recursive: true });
   }
 });
+test("migration groups same-human agents and quarantines legacy cross-project task references", () => {
+  const dir = mkdtempSync(join(tmpdir(), "colab-map-")),
+    source = join(dir, "state.json"),
+    target = join(dir, "db.sqlite"),
+    map = join(dir, "participants.json");
+  const p = randomUUID(),
+    q = randomUUID(),
+    a = randomUUID(),
+    b = randomUUID(),
+    d = randomUUID(),
+    t = randomUUID(),
+    f = randomUUID();
+  writeFileSync(
+    source,
+    JSON.stringify({
+      projects: [
+        { id: p, name: "A", goal: "A", mode: "community" },
+        { id: q, name: "B", goal: "B", mode: "owner" },
+      ],
+      agents: [
+        { id: a, name: "A1", projectId: p },
+        { id: b, name: "A2", projectId: p },
+        { id: d, name: "A3", projectId: q },
+      ],
+      tasks: [{ id: t, projectId: q, title: "Foreign task" }],
+      findings: [
+        {
+          id: f,
+          projectId: p,
+          author: a,
+          title: "Legacy claim",
+          evidence: "Log",
+          taskId: t,
+          status: "verified",
+        },
+      ],
+    }),
+  );
+  writeFileSync(
+    map,
+    JSON.stringify({ [a]: "one-human", [b]: "one-human", [d]: "one-human" }),
+  );
+  try {
+    execFileSync(process.execPath, [
+      "--import",
+      "tsx",
+      "scripts/migrate-json.ts",
+      source,
+      target,
+      map,
+    ]);
+    const c = new Colab(target, "secret");
+    const participant = c.get("agents", a).participantId;
+    assert.equal(c.get("agents", b).participantId, participant);
+    assert.equal(c.get("agents", d).participantId, participant);
+    assert.equal(
+      (c.db.prepare("SELECT count(*) n FROM participants").get() as any).n,
+      3,
+    );
+    const finding = c.get("findings", f);
+    assert.equal(finding.taskId, undefined);
+    assert.equal(finding.legacyTaskId, t);
+    assert.deepEqual(finding.codeLinks, []);
+    assert.equal(c.get("evidence", finding.evidence[0].id).description, "Log");
+    c.close();
+  } finally {
+    rmSync(dir, { recursive: true });
+  }
+});

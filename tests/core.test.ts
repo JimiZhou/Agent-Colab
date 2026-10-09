@@ -160,3 +160,61 @@ test("owner-led authorization, dispute/revocation, role changes, expiry and depe
   assert.throws(() => c.authenticate(R.token));
   c.close();
 });
+test("owners cannot link another project identity; administrator can reuse agents across projects", () => {
+  const c = new Colab(":memory:", "secret");
+  const p = c.write(admin, "p", "p", {}, () =>
+      c.createProject(admin, { name: "A", goal: "A" }),
+    ),
+    q = c.write(admin, "q", "q", {}, () =>
+      c.createProject(admin, { name: "B", goal: "B" }),
+    );
+  const a = c.write(admin, "a", "a", {}, () =>
+    c.join(admin, p.id, { name: "Agent A" }),
+  );
+  const o = c.write(admin, "o", "o", {}, () =>
+    c.join(admin, q.id, { name: "Owner B", role: "owner" }),
+  );
+  const owner = c.authenticate(o.token);
+  const payload = {
+    name: "Linked A",
+    participantId: a.agent.participantId,
+    agentId: a.agent.id,
+  };
+  assert.throws(() =>
+    c.write(owner, "link", "link", payload, () => c.join(owner, q.id, payload)),
+  );
+  const linked = c.write(admin, "link", "link", payload, () =>
+    c.join(admin, q.id, payload),
+  );
+  assert.equal(linked.agent.id, a.agent.id);
+  assert.equal(c.context(c.authenticate(linked.token), q.id).id, q.id);
+  assert.throws(() => c.context(c.authenticate(linked.token), p.id));
+  c.close();
+});
+test("partial context updates preserve public sharing, stage and immutable governance", () => {
+  const c = new Colab(":memory:", "secret");
+  const p = c.write(admin, "p", "p", {}, () =>
+    c.createProject(admin, {
+      name: "Lab",
+      goal: "Goal",
+      public: true,
+      stage: "Validation",
+      mode: "community",
+      threshold: 3,
+    }),
+  );
+  const updated = c.write(admin, "update", "update", {}, () =>
+    c.patchProject(admin, p.id, { summary: "New summary" }),
+  );
+  assert.equal(updated.summary, "New summary");
+  assert.equal(updated.public, true);
+  assert.equal(updated.stage, "Validation");
+  assert.equal(updated.mode, "community");
+  assert.equal(updated.threshold, 3);
+  assert.throws(() =>
+    c.write(admin, "policy", "update", {}, () =>
+      c.patchProject(admin, p.id, { mode: "owner" }),
+    ),
+  );
+  c.close();
+});

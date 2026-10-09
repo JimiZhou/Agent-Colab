@@ -7,6 +7,7 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 import type Database from "better-sqlite3";
+import type { EntityTable } from "./models.js";
 import { openDatabase } from "./storage.js";
 import {
   AppError,
@@ -14,6 +15,7 @@ import {
   type Role,
   type RecordData,
   projectSchema,
+  projectUpdateSchema,
   joinSchema,
   taskSchema,
   findingSchema,
@@ -35,12 +37,17 @@ export class Colab {
   close() {
     this.db.close();
   }
-  get(table: string, id: string): RecordData {
+  get(table: EntityTable, id: string): RecordData {
     const row = this.db.prepare(`SELECT data FROM ${table} WHERE id=?`).get(id);
     if (!row) throw new AppError(404, "NOT_FOUND", "Resource not found");
     return parse(row);
   }
-  all(table: string, projectId: string, limit = 30, after = 0): RecordData[] {
+  all(
+    table: "tasks" | "findings" | "repository_links",
+    projectId: string,
+    limit = 30,
+    after = 0,
+  ): RecordData[] {
     return this.db
       .prepare(
         `SELECT data FROM ${table} WHERE project_id=? ORDER BY rowid LIMIT ? OFFSET ?`,
@@ -48,7 +55,7 @@ export class Colab {
       .all(projectId, limit, after)
       .map(parse);
   }
-  update(table: string, item: RecordData) {
+  update(table: EntityTable, item: RecordData) {
     this.db
       .prepare(`UPDATE ${table} SET data=? WHERE id=?`)
       .run(JSON.stringify(item), item.id);
@@ -58,11 +65,12 @@ export class Colab {
     return new Date(this.now()).toISOString();
   }
   event(projectId: string, actor: Actor, type: string, detail: unknown) {
+    const id = randomUUID();
     this.db.prepare("INSERT INTO events(id,project_id,data) VALUES(?,?,?)").run(
-      randomUUID(),
+      id,
       projectId,
       JSON.stringify({
-        id: randomUUID(),
+        id,
         type,
         actor: actor.participantId,
         agentId: actor.agentId,
@@ -248,6 +256,12 @@ export class Colab {
         "SELECT role FROM memberships WHERE project_id=? AND participant_id=?",
       )
       .get(projectId, participantId);
+    if (b.participantId && !existing && !actor.admin)
+      throw new AppError(
+        403,
+        "IDENTITY_LINK_FORBIDDEN",
+        "Cross-project identity linking requires the instance administrator",
+      );
     if (existing && existing.role !== b.role)
       throw new AppError(
         409,
@@ -347,13 +361,7 @@ export class Colab {
   }
   patchProject(actor: Actor, projectId: string, input: unknown) {
     this.authorize(actor, projectId, ["owner"]);
-    const b = projectSchema.partial().parse(input);
-    if (b.mode || b.threshold)
-      throw new AppError(
-        400,
-        "POLICY_IMMUTABLE",
-        "Create a new project to change governance policy",
-      );
+    const b = projectUpdateSchema.parse(input);
     const p = this.update("projects", {
       ...this.get("projects", projectId),
       ...b,
@@ -500,10 +508,13 @@ export class Colab {
       this.update("tasks", { ...t, status: "submitted" });
       this.db.prepare("DELETE FROM leases WHERE task_id=?").run(t.id);
     }
+    const findingId = randomUUID(),
+      evidence = b.evidence.map((e) => ({ ...e, id: randomUUID(), findingId }));
     const f = {
-      id: randomUUID(),
+      id: findingId,
       projectId,
       ...b,
+      evidence,
       author: actor.admin
         ? this.get("projects", projectId).ownerId
         : actor.participantId,
@@ -516,10 +527,10 @@ export class Colab {
     this.db
       .prepare("INSERT INTO findings VALUES(?,?,?,?)")
       .run(f.id, projectId, actor.participantId, JSON.stringify(f));
-    for (const e of b.evidence)
+    for (const e of evidence)
       this.db
         .prepare("INSERT INTO evidence VALUES(?,?,?)")
-        .run(randomUUID(), f.id, JSON.stringify(e));
+        .run(e.id, f.id, JSON.stringify(e));
     this.event(projectId, actor, "finding.submitted", {
       findingId: f.id,
       taskId: b.taskId,
@@ -688,7 +699,11 @@ export class Colab {
       .map(parse)
       .filter((p) => p.public || actor?.admin || actor?.projectId === p.id);
   }
-  events(actor: Actor | undefined, projectId: string, input: unknown) {
+  events(
+    actor: Actor | undefined,
+    projectId: string,
+    input: unknown,
+  ): (RecordData & { sequence: number })[] {
     this.authorize(actor, projectId);
     const { limit, after } = pageSchema.parse(input);
     return this.db
@@ -780,13 +795,23 @@ export class Colab {
     return {
       ...this.get("projects", projectId),
       protocolVersion: "0.2",
-      tasks: this.all("tasks", projectId).map((t) => ({
-        ...t,
-        description: String(t.description).slice(0, 1000),
-      })),
-      findings: this.all("findings", projectId).map((f) =>
-        this.findingSummary(f),
-      ),
+      tasks: this.db
+        .prepare(
+          "SELECT data FROM tasks WHERE project_id=? ORDER BY CASE WHEN json_extract(data,'$.status')='open' THEN 0 ELSE 1 END, rowid DESC LIMIT 30",
+        )
+        .all(projectId)
+        .map(parse)
+        .map((t) => ({
+          ...t,
+          description: String(t.description).slice(0, 1000),
+        })),
+      findings: this.db
+        .prepare(
+          "SELECT data FROM findings WHERE project_id=? ORDER BY rowid DESC LIMIT 30",
+        )
+        .all(projectId)
+        .map(parse)
+        .map((f) => this.findingSummary(f)),
       agents: this.agents(actor, projectId),
       events: this.db
         .prepare(

@@ -15,6 +15,15 @@ export const projectSchema = z.object({
   stage: short.default("Exploration"),
   threshold: z.number().int().min(2).max(20).default(2),
 });
+export const projectUpdateSchema = z
+  .object({
+    name: short.optional(),
+    goal: text.optional(),
+    summary: z.string().max(8000).optional(),
+    stage: short.optional(),
+    public: z.boolean().optional(),
+  })
+  .strict();
 export const joinSchema = z.object({
   name: short,
   participantId: id.optional(),

@@ -32,7 +32,7 @@ export function createApp(
       "Content-Security-Policy":
         "default-src 'self'; connect-src 'self'; style-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
     });
-    if (req.query.token || req.query.access_token)
+    if ("token" in req.query || "access_token" in req.query)
       throw new AppError(
         400,
         "TOKEN_IN_URL",
@@ -293,36 +293,34 @@ export function createApp(
           : err.type === "entity.too.large"
             ? 413
             : 500;
-    res
-      .status(status)
-      .json({
-        error: {
-          code:
-            err instanceof AppError
-              ? err.code
-              : status === 400
-                ? "VALIDATION_ERROR"
-                : status === 413
-                  ? "PAYLOAD_TOO_LARGE"
-                  : "INTERNAL_ERROR",
-          message:
-            err instanceof AppError
-              ? err.message
-              : status === 400
-                ? "Invalid request body or parameters"
-                : status === 413
-                  ? "Payload too large"
-                  : "Internal server error",
-          ...(err instanceof z.ZodError
-            ? {
-                details: err.issues.map((x) => ({
-                  path: x.path,
-                  message: x.message,
-                })),
-              }
-            : {}),
-        },
-      });
+    res.status(status).json({
+      error: {
+        code:
+          err instanceof AppError
+            ? err.code
+            : status === 400
+              ? "VALIDATION_ERROR"
+              : status === 413
+                ? "PAYLOAD_TOO_LARGE"
+                : "INTERNAL_ERROR",
+        message:
+          err instanceof AppError
+            ? err.message
+            : status === 400
+              ? "Invalid request body or parameters"
+              : status === 413
+                ? "Payload too large"
+                : "Internal server error",
+        ...(err instanceof z.ZodError
+          ? {
+              details: err.issues.map((x) => ({
+                path: x.path,
+                message: x.message,
+              })),
+            }
+          : {}),
+      },
+    });
   });
   return app;
 }

@@ -1,10 +1,24 @@
 import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { Colab } from "../packages/core/src/service.js";
-const [source, target] = process.argv.slice(2);
+const [source, target, identityFile] = process.argv.slice(2);
 if (!source || !target)
-  throw Error("Usage: npm run migrate -- legacy-state.json destination.sqlite");
+  throw Error(
+    "Usage: npm run migrate -- legacy-state.json destination.sqlite [participant-map.json]",
+  );
 const legacy = JSON.parse(readFileSync(source, "utf8"));
+const identities: Record<string, string> = identityFile
+  ? JSON.parse(readFileSync(identityFile, "utf8"))
+  : {};
+if (
+  !identities ||
+  typeof identities !== "object" ||
+  Array.isArray(identities) ||
+  Object.values(identities).some((x) => typeof x !== "string" || !x.trim())
+)
+  throw Error(
+    "Participant map must be an object from legacy agent IDs to human identity labels",
+  );
 const c = new Colab(target, process.env.ADMIN_TOKEN || randomUUID());
 if ((c.db.prepare("SELECT count(*) n FROM projects").get() as any).n)
   throw Error("Destination must be empty; original JSON is never modified");
@@ -15,7 +29,8 @@ const admin = {
 };
 c.db
   .transaction(() => {
-    const participantMap = new Map<string, string>();
+    const participantMap = new Map<string, string>(),
+      groups = new Map<string, string>();
     for (const p of legacy.projects || []) {
       const ownerId = randomUUID();
       c.db
@@ -40,16 +55,22 @@ c.db
       for (const a of (legacy.agents || []).filter(
         (a: any) => a.projectId === p.id,
       )) {
-        const participantId = randomUUID();
+        const group = identities[a.id] || "legacy-agent:" + a.id;
+        let participantId = groups.get(group);
+        if (!participantId) {
+          participantId = randomUUID();
+          groups.set(group, participantId);
+          c.db.prepare("INSERT INTO participants VALUES(?,?)").run(
+            participantId,
+            JSON.stringify({
+              id: participantId,
+              name: a.name,
+              identityUnverified: !identities[a.id],
+              migrationIdentityLabel: identities[a.id],
+            }),
+          );
+        }
         participantMap.set(a.id, participantId);
-        c.db.prepare("INSERT INTO participants VALUES(?,?)").run(
-          participantId,
-          JSON.stringify({
-            id: participantId,
-            name: a.name,
-            identityUnverified: true,
-          }),
-        );
         c.db.prepare("INSERT INTO agents VALUES(?,?,?)").run(
           a.id,
           participantId,
@@ -63,7 +84,7 @@ c.db
           }),
         );
         c.db
-          .prepare("INSERT INTO memberships VALUES(?,?,?)")
+          .prepare("INSERT OR IGNORE INTO memberships VALUES(?,?,?)")
           .run(p.id, participantId, "contributor");
       }
       for (const t of (legacy.tasks || []).filter(
@@ -86,13 +107,23 @@ c.db
         const author = participantMap.get(f.author) || ownerId;
         const item = {
           ...f,
+          taskId: (legacy.tasks || []).some(
+            (t: any) => t.id === f.taskId && t.projectId === p.id,
+          )
+            ? f.taskId
+            : undefined,
+          legacyTaskId: f.taskId,
+          legacyAuthor: f.author,
+          codeLinks: [],
           author,
           agentId: f.author === "admin" ? undefined : f.author,
           legacyStatus: f.status,
           status: "proposed",
           recognition: "pending",
           reproductionStatus: "unverified",
-          evidence: [{ description: f.evidence }],
+          evidence: [
+            { id: randomUUID(), findingId: f.id, description: f.evidence },
+          ],
           method: "Legacy import",
           summary: f.title,
           direction: "Legacy",
@@ -103,7 +134,7 @@ c.db
           .run(f.id, p.id, author, JSON.stringify(item));
         c.db
           .prepare("INSERT INTO evidence VALUES(?,?,?)")
-          .run(randomUUID(), f.id, JSON.stringify(item.evidence[0]));
+          .run(item.evidence[0].id, f.id, JSON.stringify(item.evidence[0]));
       }
       for (const e of (legacy.events || []).filter(
         (e: any) => e.projectId === p.id,
