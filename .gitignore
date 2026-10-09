@@ -1,4 +1,7 @@
 node_modules/
+dist/
 data/
 .env
-.DS_Store
+*.sqlite*
+test-results/
+playwright-report/

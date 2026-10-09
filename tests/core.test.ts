@@ -1,0 +1,27 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { Colab } from '../packages/core/src/service.js';
+const admin={credentialId:'admin',participantId:'admin',admin:true};
+test('SQLite project, identities, permissions, idempotency and credential revocation',()=>{
+ const c=new Colab(':memory:','secret');const p=c.write(admin,'p','create',{},()=>c.createProject(admin,{name:'Lab',goal:'Research'}));assert.equal(p.public,false);
+ const invite=c.write(admin,'join','join',{},()=>c.join(admin,p.id,{name:'A'}));const a=c.authenticate(invite.token);assert.equal(a.participantId,invite.agent.participantId);
+ assert.throws(()=>c.context(undefined,p.id));assert.equal(c.context(a,p.id).name,'Lab');
+ assert.deepEqual(c.write(admin,'p','create',{},()=>{throw Error('should not run');}),p);
+ assert.throws(()=>c.write(admin,'p','other',{},()=>null));
+ c.write(admin,'revoke','revoke',{},()=>c.revoke(admin,p.id,invite.credential.id));assert.throws(()=>c.authenticate(invite.token));c.close();
+});
+test('lease conflict, expiry, submission and participant-aware community recognition',()=>{
+ let time=100000;const c=new Colab(':memory:','secret',()=>time);const p=c.write(admin,'p','p',{},()=>c.createProject(admin,{name:'Lab',goal:'Reproduce',mode:'community'}));
+ const join=(key:string,b:any)=>c.write(admin,key,'join',b,()=>c.join(admin,p.id,b));const A=join('a',{name:'A'}),B=join('b',{name:'B'}),C=join('c',{name:'C'}),B2=join('b2',{name:'B2',participantId:B.agent.participantId});
+ const a=c.authenticate(A.token),b=c.authenticate(B.token),cc=c.authenticate(C.token),b2=c.authenticate(B2.token);
+ const t=c.write(a,'t','task',{},()=>c.task(a,p.id,{title:'Task'}));
+ c.write(a,'claim','claim',{},()=>c.taskAction(a,p.id,t.id,'claim'));assert.throws(()=>c.write(b,'claim','claim',{},()=>c.taskAction(b,p.id,t.id,'claim')));
+ time+=300001;c.expire(p.id);assert.equal(c.get('tasks',t.id).status,'open');
+ c.write(a,'claim2','claim',{},()=>c.taskAction(a,p.id,t.id,'claim'));
+ const f=c.write(a,'f','finding',{},()=>c.finding(a,p.id,{title:'Finding',summary:'Result',direction:'test',method:'experiment',taskId:t.id,evidence:[{description:'Run log'}],reproduction:'Run tests'}));
+ const r={findingId:f.id,vote:'approve',environment:'Node22',evidence:'Independent run log',reproduced:true};
+ assert.throws(()=>c.write(a,'self','review',r,()=>c.review(a,p.id,r)));
+ c.write(b,'r','review',r,()=>c.review(b,p.id,r));assert.throws(()=>c.write(b2,'r','review',r,()=>c.review(b2,p.id,r)));
+ c.write(cc,'r','review',r,()=>c.review(cc,p.id,r));assert.equal(c.get('findings',f.id).status,'verified');assert.equal(c.get('findings',f.id).reproduction,'independently_reported');
+ assert.equal(c.get('tasks',t.id).status,'verified');c.close();
+});
