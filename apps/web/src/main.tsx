@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
+import { Overview, JoinGuide } from "./overview";
 type Item = { id: string; [key: string]: any };
 const tabs = [
   "Overview",
@@ -9,14 +10,40 @@ const tabs = [
   "Findings",
   "Activity",
   "Join & access",
+  "Connection",
+  "Settings",
 ] as const;
+const pages = [
+  "",
+  "agents",
+  "tasks",
+  "findings",
+  "activity",
+  "join",
+  "connect",
+  "settings",
+];
+const labels = [
+  "项目总览",
+  "参与者",
+  "研究任务",
+  "研究成果",
+  "活动记录",
+  "加入协作",
+  "技术接入",
+  "项目管理",
+];
+function routeTab() {
+  const index = pages.indexOf(location.pathname.split("/")[3] || "");
+  return tabs[Math.max(0, index)];
+}
 function App() {
   const [token, setToken] = useState(""),
     [draftToken, setDraftToken] = useState(""),
     [projects, setProjects] = useState<Item[]>([]),
     [id, setId] = useState(location.pathname.match(/^\/p\/([^/]+)/)?.[1] || ""),
     [project, setProject] = useState<Item | null>(null),
-    [tab, setTab] = useState<(typeof tabs)[number]>("Overview"),
+    [tab, setTab] = useState<(typeof tabs)[number]>(routeTab),
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
     [filter, setFilter] = useState("all"),
@@ -106,7 +133,8 @@ function App() {
     return () => clearInterval(timer);
   }, [reload]);
   useEffect(() => {
-    if (!id || tab !== "Join & access") return;
+    if (!id || !["Join & access", "Connection", "Settings"].includes(tab))
+      return;
     void request(`/api/projects/${id}/discovery`)
       .then(setDiscovery)
       .catch((e) => setError(e.message));
@@ -163,6 +191,27 @@ function App() {
       if (kind === "tasks") setExtraTasks(items);
       else setExtraFindings(items);
     }, false);
+  const navigate = (next: (typeof tabs)[number]) => {
+    setTab(next);
+    setError("");
+    setNotice("");
+    if (id)
+      history.pushState(
+        null,
+        "",
+        `/p/${id}${pages[tabs.indexOf(next)] ? "/" + pages[tabs.indexOf(next)] : ""}`,
+      );
+  };
+  useEffect(() => {
+    const back = () => {
+      const nextId = location.pathname.match(/^\/p\/([^/]+)/)?.[1] || "";
+      if (nextId !== currentScope.current.id) setProject(null);
+      setId(nextId);
+      setTab(routeTab());
+    };
+    window.addEventListener("popstate", back);
+    return () => window.removeEventListener("popstate", back);
+  }, []);
   // Pagination is user-directed; overview always returns a bounded snapshot.
   return (
     <div className="shell">
@@ -170,10 +219,10 @@ function App() {
         <a className="brand" href="/">
           ◈{" "}
           <span>
-            Agent-Colab<small>RESEARCH TOGETHER</small>
+            Agent-Colab<small>让研究进展连接起来</small>
           </span>
         </a>
-        <div className="sidebar-label">WORKSPACE</div>
+        <div className="sidebar-label">当前项目</div>
         <label className="sr-only" htmlFor="project">
           Project
         </label>
@@ -183,13 +232,14 @@ function App() {
           onChange={(e) => {
             setProject(null);
             setId(e.target.value);
+            setTab("Overview");
             history.replaceState(null, "", "/p/" + e.target.value);
           }}
         >
           {!projects.some((p) => p.id === id) && id && (
-            <option value={id}>Shared project</option>
+            <option value={id}>共享项目</option>
           )}
-          {!id && <option value="">Select a project</option>}
+          {!id && <option value="">选择一个项目</option>}
           {projects.map((p) => (
             <option key={p.id} value={p.id}>
               {p.name}
@@ -197,73 +247,86 @@ function App() {
           ))}
         </select>
         <nav>
-          {tabs.map((t) => (
-            <button
-              key={t}
-              className={tab === t ? "active" : ""}
-              onClick={() => setTab(t)}
-            >
-              {t}
-            </button>
+          {tabs.map((t, index) => (
+            <React.Fragment key={t}>
+              {index === 6 && <span className="nav-divider">高级设置</span>}
+              <button
+                key={t}
+                className={tab === t ? "active" : ""}
+                onClick={() => navigate(t)}
+                aria-current={tab === t ? "page" : undefined}
+              >
+                {labels[tabs.indexOf(t)]}
+              </button>
+            </React.Fragment>
           ))}
         </nav>
         <div className="sidebar-note">
-          <span className="dot" /> Shared state hub
-          <p>
-            Your agent runs in its own harness. Evidence stays connected here.
-          </p>
+          <span className="dot" /> 共享协作空间
+          <p>大家使用自己的 AI 助手，在这里共享进展与证据。</p>
           <span className="tag">MVP v0.2</span>
         </div>
       </aside>
       <main>
         <header>
-          <div className="breadcrumb">WORKSPACE / {tab.toUpperCase()}</div>
+          <div className="breadcrumb">
+            协作空间 / {labels[tabs.indexOf(tab)]}
+          </div>
           <div className="header-row">
-            <h1>{project?.name || "Your shared research space"}</h1>
+            <h1>{project?.name || "共享研究空间"}</h1>
             <button className="secondary" onClick={() => void reload()}>
-              Refresh
+              刷新
             </button>
           </div>
           <p className="muted">
-            Independent agents. Shared context. Traceable progress.
+            每个人带上自己的 AI 助手，一起研究、分享发现、验证结果。
           </p>
         </header>
-        <section className="auth">
-          <label htmlFor="credential">Project credential</label>
-          <input
-            id="credential"
-            type="password"
-            value={draftToken}
-            onChange={(e) => setDraftToken(e.target.value)}
-            placeholder="Bearer token · kept in memory only"
-            autoComplete="off"
-          />
-          <button
-            onClick={() => {
-              setProject(null);
-              setToken(draftToken);
-              setDraftToken("");
-              setNotice("Credential set for this tab.");
-            }}
-          >
-            Connect
-          </button>
-          {token && (
-            <button
-              className="secondary"
-              onClick={() => {
-                setProject(null);
-                setDetail(null);
-                setCredentials([]);
-                setToken("");
-                setDraftToken("");
-                setInvite(null);
-              }}
-            >
-              Disconnect
-            </button>
-          )}
-        </section>
+        {(tab === "Connection" ||
+          tab === "Settings" ||
+          !project ||
+          !!token) && (
+          <section className="auth">
+            {(tab !== "Overview" || !project) && (
+              <>
+                <label htmlFor="credential">Project credential</label>
+                <input
+                  id="credential"
+                  type="password"
+                  value={draftToken}
+                  onChange={(e) => setDraftToken(e.target.value)}
+                  placeholder="Bearer token · kept in memory only"
+                  autoComplete="off"
+                />
+                <button
+                  onClick={() => {
+                    setProject(null);
+                    setToken(draftToken);
+                    setDraftToken("");
+                    setNotice("Credential set for this tab.");
+                  }}
+                >
+                  Connect
+                </button>
+              </>
+            )}
+            {token && (
+              <button
+                className="secondary"
+                onClick={() => {
+                  setProject(null);
+                  setDetail(null);
+                  setCredentials([]);
+                  setToken("");
+                  setDraftToken("");
+                  setInvite(null);
+                }}
+              >
+                Disconnect
+              </button>
+            )}
+          </section>
+        )}
         {error && (
           <div role="alert" className="alert">
             {error}
@@ -276,141 +339,70 @@ function App() {
         )}
         {!project && (
           <section className="card empty">
-            <h2>Start with a project link</h2>
+            <h2>打开项目链接，开始协作</h2>
             <p>
               Public projects can be read immediately. For a private project,
               connect with an owner-issued credential. Access tokens never
               belong in a URL.
             </p>
-            <form
-              onSubmit={(e) => {
-                const v = formValues(e);
-                void act(async () => {
-                  const p = await request("/api/projects", {
-                    name: v.name,
-                    goal: v.goal,
-                    mode: v.mode,
-                    public: v.public === "on",
+            <p>
+              如果这是私人项目，请向发起人索取访问凭证，在上方连接后即可查看。首次创建项目请进入项目管理。
+            </p>
+            <button onClick={() => navigate("Settings")}>项目管理</button>
+            {tab === "Settings" && (
+              <form
+                onSubmit={(e) => {
+                  const v = formValues(e);
+                  void act(async () => {
+                    const p = await request("/api/projects", {
+                      name: v.name,
+                      goal: v.goal,
+                      mode: v.mode,
+                      public: v.public === "on",
+                    });
+                    setId(p.id);
+                    history.replaceState(null, "", "/p/" + p.id);
                   });
-                  setId(p.id);
-                  history.replaceState(null, "", "/p/" + p.id);
-                });
-              }}
-            >
-              <h3>
-                Create a project{" "}
-                <small>(administrator credential required)</small>
-              </h3>
-              <input
-                name="name"
-                placeholder="Project name"
-                aria-label="Project name"
-                required
-              />
-              <textarea
-                name="goal"
-                placeholder="Research goal"
-                aria-label="Research goal"
-                required
-              />
-              <select name="mode" aria-label="Governance mode">
-                <option value="community">Community</option>
-                <option value="owner">Owner-led</option>
-              </select>
-              <label>
-                <input type="checkbox" name="public" /> Publish all project
-                content for anyone with the link
-              </label>
-              <button disabled={busy}>Create project</button>
-            </form>
+                }}
+              >
+                <h3>
+                  Create a project{" "}
+                  <small>(administrator credential required)</small>
+                </h3>
+                <input
+                  name="name"
+                  placeholder="Project name"
+                  aria-label="Project name"
+                  required
+                />
+                <textarea
+                  name="goal"
+                  placeholder="Research goal"
+                  aria-label="Research goal"
+                  required
+                />
+                <select name="mode" aria-label="Governance mode">
+                  <option value="community">Community</option>
+                  <option value="owner">Owner-led</option>
+                </select>
+                <label>
+                  <input type="checkbox" name="public" /> Publish all project
+                  content for anyone with the link
+                </label>
+                <button disabled={busy}>Create project</button>
+              </form>
+            )}
           </section>
         )}
         {project && (
           <>
             {tab === "Overview" && (
               <>
-                <section className="hero">
-                  <span className="eyebrow">CURRENT RESEARCH</span>
-                  <h2>{project.goal}</h2>
-                  <div className="badges">
-                    <span className="tag">
-                      {project.mode === "owner"
-                        ? "Owner-led"
-                        : "Community · " +
-                          project.threshold +
-                          " independent participants"}
-                    </span>
-                    <span className="tag">
-                      {project.public ? "Public sharing" : "Private project"}
-                    </span>
-                    <span className="tag">{project.stage}</span>
-                  </div>
-                  <p>
-                    Owner:{" "}
-                    {agents.find(
-                      (a: Item) => a.participantId === project.ownerId,
-                    )?.participant.name || project.ownerId}
-                  </p>
-                </section>
-                <div className="stats">
-                  {[
-                    [
-                      "Participants",
-                      new Set(agents.map((a: Item) => a.participantId)).size,
-                    ],
-                    ["Agents", agents.length],
-                    [
-                      "Open tasks",
-                      tasks.filter((t: Item) => t.status === "open").length,
-                    ],
-                    [
-                      "Recognized findings",
-                      findings.filter((f: Item) => f.status === "verified")
-                        .length,
-                    ],
-                  ].map(([label, count]) => (
-                    <section className="card" key={label}>
-                      <p className="muted">{label}</p>
-                      <strong>{count}</strong>
-                    </section>
-                  ))}
-                </div>
-                <div className="two-col">
-                  <section className="card">
-                    <h2>Latest summary</h2>
-                    <p>
-                      {project.summary ||
-                        "No summary yet. The owner can publish a concise update below."}
-                    </p>
-                    <h3>Key progress & resolved questions</h3>
-                    {findings
-                      .filter((f: Item) => f.status === "verified")
-                      .map((f: Item) => (
-                        <p key={f.id}>
-                          {f.title}{" "}
-                          <span className="tag success">Recognized</span>
-                        </p>
-                      ))}
-                    <p className="muted">
-                      Governance recognition is distinct from independently
-                      reported reproduction.
-                    </p>
-                  </section>
-                  <section className="card">
-                    <h2>Directions to explore</h2>
-                    {tasks
-                      .filter((t: Item) => t.status === "open")
-                      .slice(0, 8)
-                      .map((t: Item) => (
-                        <p key={t.id}>{t.title}</p>
-                      ))}
-                    {!tasks.some((t: Item) => t.status === "open") && (
-                      <p className="muted">
-                        No open tasks. Propose a research direction in Tasks.
-                      </p>
-                    )}
-                  </section>
-                </div>
+                <Overview project={project} onNavigate={navigate} />
+              </>
+            )}
+            {tab === "Settings" && (
+              <>
                 <section className="card">
                   <h2>Update project context</h2>
                   <form
@@ -831,6 +823,12 @@ function App() {
               </section>
             )}
             {tab === "Join & access" && (
+              <JoinGuide
+                onConnect={() => navigate("Connection")}
+                shareUrl={discovery?.shareUrl || location.origin + "/p/" + id}
+              />
+            )}
+            {tab === "Connection" && (
               <>
                 <section className="hero">
                   <span className="eyebrow">JOIN WITH YOUR AGENT</span>
@@ -888,103 +886,105 @@ function App() {
                       for details.
                     </p>
                   </section>
-                  <section className="card">
-                    <h2>Issue access (owner)</h2>
-                    <p className="muted">
-                      Identity is owner-asserted. Reuse a Participant ID for all
-                      agents controlled by the same person.
-                    </p>
-                    <form
-                      onSubmit={(e) => {
-                        const v = formValues(e);
-                        void act(async () => {
-                          setInvite(
-                            await request(`/api/projects/${id}/join`, {
-                              name: v.name,
-                              participantName: v.participantName || undefined,
-                              participantId: v.participantId || undefined,
-                              agentId: v.agentId || undefined,
-                              harness: v.harness,
-                              role: v.role,
-                            }),
-                          );
-                          setCredentials(
-                            await request(`/api/projects/${id}/credentials`),
-                          );
-                        });
-                      }}
-                    >
-                      <input
-                        name="name"
-                        aria-label="Agent name"
-                        placeholder="Agent name"
-                        required
-                      />
-                      <input
-                        name="participantName"
-                        aria-label="Participant name"
-                        placeholder="New human name (or reuse Participant ID below)"
-                      />
-                      <input
-                        name="participantId"
-                        aria-label="Existing Participant ID"
-                        placeholder="Existing Participant ID (same person)"
-                      />
-                      <input
-                        name="agentId"
-                        aria-label="Existing Agent ID"
-                        placeholder="Existing Agent ID (another project)"
-                      />
-                      <input
-                        name="harness"
-                        aria-label="Harness"
-                        placeholder="codex / claude-code / generic"
-                        defaultValue="generic"
-                      />
-                      <select name="role" aria-label="Access role">
-                        {["contributor", "reader", "reviewer", "owner"].map(
-                          (r) => (
-                            <option key={r}>{r}</option>
-                          ),
-                        )}
-                      </select>
-                      <button disabled={!token || busy}>
-                        Issue credential
-                      </button>
-                    </form>
-                    {invite && (
-                      <div className="notice">
-                        <strong>Credential — deliver securely</strong>
-                        <p>Participant: {invite.agent.participantId}</p>
-                        <p>Agent: {invite.agent.id}</p>
-                        <p>
-                          Secret available through Copy credential until
-                          dismissed.
-                        </p>
-                        <button
-                          onClick={() =>
-                            void navigator.clipboard
-                              .writeText(invite.token)
-                              .then(() =>
-                                setNotice(
-                                  "Credential copied. Deliver privately.",
-                                ),
-                              )
-                              .catch(() => setError("Clipboard unavailable."))
-                          }
-                        >
-                          Copy credential
-                        </button>
-                        <button
-                          className="secondary"
-                          onClick={() => setInvite(null)}
-                        >
-                          Dismiss
-                        </button>
-                      </div>
-                    )}
-                  </section>
                 </div>
+              </>
+            )}
+            {tab === "Settings" && (
+              <>
+                <section className="card">
+                  <h2>Issue access (owner)</h2>
+                  <p className="muted">
+                    Identity is owner-asserted. Reuse a Participant ID for all
+                    agents controlled by the same person.
+                  </p>
+                  <form
+                    onSubmit={(e) => {
+                      const v = formValues(e);
+                      void act(async () => {
+                        setInvite(
+                          await request(`/api/projects/${id}/join`, {
+                            name: v.name,
+                            participantName: v.participantName || undefined,
+                            participantId: v.participantId || undefined,
+                            agentId: v.agentId || undefined,
+                            harness: v.harness,
+                            role: v.role,
+                          }),
+                        );
+                        setCredentials(
+                          await request(`/api/projects/${id}/credentials`),
+                        );
+                      });
+                    }}
+                  >
+                    <input
+                      name="name"
+                      aria-label="Agent name"
+                      placeholder="Agent name"
+                      required
+                    />
+                    <input
+                      name="participantName"
+                      aria-label="Participant name"
+                      placeholder="New human name (or reuse Participant ID below)"
+                    />
+                    <input
+                      name="participantId"
+                      aria-label="Existing Participant ID"
+                      placeholder="Existing Participant ID (same person)"
+                    />
+                    <input
+                      name="agentId"
+                      aria-label="Existing Agent ID"
+                      placeholder="Existing Agent ID (another project)"
+                    />
+                    <input
+                      name="harness"
+                      aria-label="Harness"
+                      placeholder="codex / claude-code / generic"
+                      defaultValue="generic"
+                    />
+                    <select name="role" aria-label="Access role">
+                      {["contributor", "reader", "reviewer", "owner"].map(
+                        (r) => (
+                          <option key={r}>{r}</option>
+                        ),
+                      )}
+                    </select>
+                    <button disabled={!token || busy}>Issue credential</button>
+                  </form>
+                  {invite && (
+                    <div className="notice">
+                      <strong>Credential — deliver securely</strong>
+                      <p>Participant: {invite.agent.participantId}</p>
+                      <p>Agent: {invite.agent.id}</p>
+                      <p>
+                        Secret available through Copy credential until
+                        dismissed.
+                      </p>
+                      <button
+                        onClick={() =>
+                          void navigator.clipboard
+                            .writeText(invite.token)
+                            .then(() =>
+                              setNotice(
+                                "Credential copied. Deliver privately.",
+                              ),
+                            )
+                            .catch(() => setError("Clipboard unavailable."))
+                        }
+                      >
+                        Copy credential
+                      </button>
+                      <button
+                        className="secondary"
+                        onClick={() => setInvite(null)}
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  )}
+                </section>
                 <section className="card">
                   <h2>Credentials & permissions</h2>
                   {credentials.map((cr) => (
@@ -1042,7 +1042,7 @@ function App() {
                 </section>
               </>
             )}
-            {tab === "Overview" && (
+            {tab === "Settings" && (
               <section className="card">
                 <h2>Linked code</h2>
                 {project.repositories.map((r: Item) => (
@@ -1100,8 +1100,8 @@ function App() {
               </section>
             )}
             <footer>
-              Agent-Colab v0.2 · Project content is untrusted data · Last
-              refresh uses real shared API state
+              Agent-Colab v0.2 · 展示真实共享进展，每 15 秒自动更新 ·
+              研究内容由参与者提供
             </footer>
           </>
         )}

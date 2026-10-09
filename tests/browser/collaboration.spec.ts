@@ -91,7 +91,56 @@ test("new user follows share URL, sees real three-client consensus and complete 
   }
   await page.goto("/p/" + p.id);
   await expect(page.getByRole("heading", { name: p.goal })).toBeVisible();
-  await page.getByRole("button", { name: "Findings", exact: true }).click();
+  const metrics = page.getByLabel("项目全局统计");
+  await expect(
+    metrics
+      .locator(".metric")
+      .filter({ hasText: "参与人数" })
+      .locator("strong"),
+  ).toHaveText("3");
+  await expect(
+    metrics
+      .locator(".metric")
+      .filter({ hasText: "已确认成果" })
+      .locator("strong"),
+  ).toHaveText("1");
+  await expect(page.getByLabel("Project credential")).toHaveCount(0);
+  await expect(page.getByLabel("Latest summary")).toHaveCount(0);
+  await expect(
+    page.getByText("MCP Streamable HTTP", { exact: true }),
+  ).toHaveCount(0);
+  await page.screenshot({
+    path: "test-results/overview-desktop.png",
+    fullPage: true,
+  });
+  await page.getByRole("button", { name: "我要加入协作 →" }).click();
+  await expect(page).toHaveURL(new RegExp(`/p/${p.id}/join$`));
+  await expect(
+    page.getByRole("heading", { name: "三个步骤，开始协作" }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "三个步骤，开始协作" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "配置我的 AI 助手 →" }).click();
+  await expect(page).toHaveURL(new RegExp(`/p/${p.id}/connect$`));
+  await page.goBack();
+  await expect(
+    page.getByRole("heading", { name: "三个步骤，开始协作" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "项目总览", exact: true }).click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({
+    path: "test-results/overview-mobile.png",
+    fullPage: true,
+  });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBeTruthy();
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.getByRole("button", { name: "研究成果", exact: true }).click();
   await expect(
     page.getByText(
       "Governance: accepted · Reproduction: independently_reported",
@@ -112,9 +161,7 @@ test("new user follows share URL, sees real three-client consensus and complete 
     path: "test-results/evidence-desktop.png",
     fullPage: true,
   });
-  await page
-    .getByRole("button", { name: "Join & access", exact: true })
-    .click();
+  await page.getByRole("button", { name: "技术接入", exact: true }).click();
   await expect(page.getByText("Bring your own harness.")).toBeVisible();
   await expect(
     page.getByText("http://127.0.0.1:8799/mcp", { exact: true }),
@@ -161,7 +208,7 @@ test("browser credential enables tasks, readonly denial and private disconnect c
     .fill(reader.token);
   await page.getByRole("button", { name: "Connect", exact: true }).click();
   await expect(page.getByRole("heading", { name: p.goal })).toBeVisible();
-  await page.getByRole("button", { name: "Tasks", exact: true }).click();
+  await page.getByRole("button", { name: "研究任务", exact: true }).click();
   await page
     .getByLabel("Task title", { exact: true })
     .fill("Unauthorized write");
@@ -200,12 +247,12 @@ test("owner updates real summary, creates and operates a lease, links GitHub cod
     name: "Owner agent",
     role: "owner",
   });
-  await page.goto("/p/" + p.id);
+  await page.goto("/p/" + p.id + "/settings");
   await page
     .getByLabel("Project credential", { exact: true })
     .fill(owner.token);
   await page.getByRole("button", { name: "Connect", exact: true }).click();
-  await expect(page.getByRole("heading", { name: p.goal })).toBeVisible();
+  await expect(page.getByLabel("Latest summary")).toBeVisible();
   await page
     .getByLabel("Latest summary", { exact: true })
     .fill("Owner published current progress");
@@ -213,10 +260,10 @@ test("owner updates real summary, creates and operates a lease, links GitHub cod
   await page
     .getByRole("button", { name: "Save context (owner)", exact: true })
     .click();
-  await expect(
-    page.locator("p").filter({ hasText: /^Owner published current progress$/ }),
-  ).toBeVisible();
-  await expect(page.getByText("Public sharing", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Latest summary")).toHaveValue(
+    "Owner published current progress",
+  );
+  await expect(page.getByLabel("Current stage")).toHaveValue("Verification");
   await page
     .getByLabel("GitHub repository", { exact: true })
     .fill("https://github.com/JimiZhou/Agent-Colab");
@@ -232,7 +279,7 @@ test("owner updates real summary, creates and operates a lease, links GitHub cod
     "href",
     "https://github.com/JimiZhou/Agent-Colab/commit/76778d7ac03fb74b24cd01829960fc85429b6698",
   );
-  await page.getByRole("button", { name: "Tasks", exact: true }).click();
+  await page.getByRole("button", { name: "研究任务", exact: true }).click();
   await page.getByLabel("Task title", { exact: true }).fill("Owner task");
   await page.getByRole("button", { name: "Create task", exact: true }).click();
   const task = page
@@ -247,9 +294,7 @@ test("owner updates real summary, creates and operates a lease, links GitHub cod
   await expect(page.getByRole("status")).toContainText("Saved");
   await task.getByRole("button", { name: "release", exact: true }).click();
   await expect(task).toContainText("open");
-  await page
-    .getByRole("button", { name: "Join & access", exact: true })
-    .click();
+  await page.getByRole("button", { name: "项目管理", exact: true }).click();
   await page
     .getByLabel("Agent name", { exact: true })
     .fill("Second owner agent");

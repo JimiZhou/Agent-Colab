@@ -320,3 +320,51 @@ test("agent names never automatically mint independent participant votes", () =>
   );
   c.close();
 });
+
+test("overview totals are project-scoped, participant-aware and independent of snapshot limits", () => {
+  let time = Date.now();
+  const c = new Colab(":memory:", "secret", () => time);
+  const p = c.write(admin, "overview-project", "create", {}, () =>
+    c.createProject(admin, {
+      name: "Overview",
+      goal: "Accurate counts",
+      public: true,
+    }),
+  );
+  const first = c.write(admin, "overview-first", "join", {}, () =>
+    c.join(admin, p.id, { name: "First", participantName: "One human" }),
+  );
+  const actor = c.authenticate(first.token);
+  c.write(admin, "overview-second", "join", {}, () =>
+    c.join(admin, p.id, {
+      name: "Second",
+      participantId: first.agent.participantId,
+    }),
+  );
+  for (let i = 0; i < 35; i++)
+    c.write(actor, `overview-task-${i}`, "task", {}, () =>
+      c.task(actor, p.id, { title: `Task ${i}` }),
+    );
+  const task = c.context(undefined, p.id).tasks[0];
+  c.write(actor, "overview-claim", "claim", {}, () =>
+    c.taskAction(actor, p.id, task.id, "claim"),
+  );
+  const snapshot = c.context(undefined, p.id);
+  assert.equal(snapshot.tasks.length, 30);
+  assert.equal(snapshot.stats.tasks, 35);
+  assert.equal(snapshot.stats.openTasks, 34);
+  assert.equal(snapshot.stats.participants, 1);
+  assert.equal(snapshot.stats.agents, 2);
+  assert.equal(snapshot.stats.workingAgents, 1);
+  assert.equal(snapshot.stats.workingTasks, 1);
+  time += 301000;
+  assert.equal(c.context(undefined, p.id).stats.workingAgents, 0);
+  assert.equal(c.context(undefined, p.id).stats.openTasks, 35);
+  const privateProject = c.write(admin, "overview-private", "create", {}, () =>
+    c.createProject(admin, { name: "Hidden", goal: "Private" }),
+  );
+  assert.throws(() => c.context(undefined, privateProject.id));
+  assert.throws(() => c.context(actor, privateProject.id));
+  assert.equal(c.context(undefined, p.id).stats.tasks, 35);
+  c.close();
+});

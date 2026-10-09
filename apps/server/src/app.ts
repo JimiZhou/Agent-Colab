@@ -271,7 +271,7 @@ export function createApp(
   const web = resolve("apps/web/dist");
   if (existsSync(web)) {
     app.use(express.static(web, { index: false }));
-    app.get(["/", "/p/:id"], (_req, res) =>
+    app.get(["/", "/p/:id", "/p/:id/:page"], (_req, res) =>
       res.sendFile(resolve(web, "index.html")),
     );
   }

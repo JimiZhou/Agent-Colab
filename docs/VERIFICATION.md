@@ -36,3 +36,7 @@ Not exercised: real Codex/Claude model-driven sessions, Cloudflare account/tunne
 Initial remote Node 22/24 browser checks exposed a credential-switch UI timing race: the old public form was briefly available while the authenticated workspace reloaded. Connect/project-switch now clears the old workspace synchronously; no test retries or timeout increases mask this race. The original failing run is preserved in GitHub Actions history.
 
 Invitation registration requires an existing participantId or an explicit new-human participantName; an agent name alone cannot automatically mint an independent voter. Owner bootstrap binds the founding owner. Same-human agents continue to share one membership and review vote.
+
+## Novice dashboard follow-up
+
+The overview and joining experience now use plain Chinese explanations, project-wide SQLite totals, participant previews, task progress and prominent joining actions. Advanced connection and owner controls have separate directly accessible pages. The updated suite passes 15 backend/integration tests and 3 Chromium tests, including accurate totals beyond the 30-task snapshot limit, same-human agent counting, lease expiry, private-project access, overview-to-join-to-connect navigation, direct refresh/back navigation, mobile overflow, existing task controls and owner management. Typecheck, production build and formatting pass. Browser screenshots are generated at `test-results/overview-desktop.png` and `test-results/overview-mobile.png`.

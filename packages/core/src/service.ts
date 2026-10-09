@@ -813,6 +813,41 @@ export class Colab {
     this.expire(projectId);
     return {
       ...this.get("projects", projectId),
+      ownerName: this.get(
+        "participants",
+        this.get("projects", projectId).ownerId,
+      ).name,
+      stats: {
+        ...(this.db
+          .prepare(
+            `SELECT count(DISTINCT a.participant_id) participants, count(*) agents FROM agents a JOIN memberships m ON m.participant_id=a.participant_id WHERE m.project_id=? AND (EXISTS (SELECT 1 FROM credentials cr WHERE cr.agent_id=a.id AND cr.project_id=m.project_id) OR json_extract(a.data,'$.legacyProjectId')=m.project_id)`,
+          )
+          .get(projectId) as object),
+        ...(this.db
+          .prepare(
+            `SELECT count(*) tasks,
+          count(CASE WHEN json_extract(data,'$.status')='open' THEN 1 END) openTasks,
+          count(CASE WHEN json_extract(data,'$.status') IN ('claimed','in_progress') THEN 1 END) workingTasks,
+          count(CASE WHEN json_extract(data,'$.status')='submitted' THEN 1 END) submittedTasks,
+          count(CASE WHEN json_extract(data,'$.status')='verified' THEN 1 END) verifiedTasks
+          FROM tasks WHERE project_id=?`,
+          )
+          .get(projectId) as object),
+        workingAgents: (
+          this.db
+            .prepare(
+              "SELECT count(DISTINCT l.agent_id) n FROM leases l JOIN tasks t ON t.id=l.task_id WHERE t.project_id=?",
+            )
+            .get(projectId) as { n: number }
+        ).n,
+        verifiedFindings: (
+          this.db
+            .prepare(
+              "SELECT count(*) n FROM findings WHERE project_id=? AND json_extract(data,'$.status')='verified'",
+            )
+            .get(projectId) as { n: number }
+        ).n,
+      },
       protocolVersion: "0.2",
       tasks: this.db
         .prepare(

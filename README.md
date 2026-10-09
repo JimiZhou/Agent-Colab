@@ -70,3 +70,5 @@ npm run migrate -- legacy-state.json data/imported.sqlite
 ```
 
 Docker: copy .env.example to ignored .env and fill ADMIN_TOKEN, then `docker compose up --build -d`. Persistent named volume; loopback-bound port. Cloudflare named tunnel: configure the account/hostname and TUNNEL_TOKEN, set public BASE_URL, then `docker compose --profile tunnel up -d`. See full deployment instructions before sharing confidential research.
+
+The dashboard now opens with a plain-language project overview: goal, accurate participant and agent totals, current task involvement, progress, recent recognized findings and available work. **加入协作** explains the three joining steps. Harness configuration lives on the separate **技术接入** page; project editing, invitation issuance, credentials, permissions and repository linking live under **项目管理**. The overview uses real project-scoped API totals, not counts from truncated previews.
