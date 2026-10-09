@@ -1,13 +1,18 @@
-import Database from 'better-sqlite3';
-import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import Database from "better-sqlite3";
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 export function openDatabase(file: string) {
-  if (file !== ':memory:') mkdirSync(dirname(file), { recursive: true });
+  if (file !== ":memory:") mkdirSync(dirname(file), { recursive: true });
   const db = new Database(file);
-  db.pragma('journal_mode = WAL'); db.pragma('foreign_keys = ON'); db.pragma('busy_timeout = 5000');
-  db.exec(`CREATE TABLE IF NOT EXISTS migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);`);
-  if (!db.prepare('SELECT 1 FROM migrations WHERE version=1').get()) db.transaction(() => {
-    db.exec(`
+  db.pragma("journal_mode = WAL");
+  db.pragma("foreign_keys = ON");
+  db.pragma("busy_timeout = 5000");
+  db.exec(
+    `CREATE TABLE IF NOT EXISTS migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);`,
+  );
+  if (!db.prepare("SELECT 1 FROM migrations WHERE version=1").get())
+    db.transaction(() => {
+      db.exec(`
       CREATE TABLE participants(id TEXT PRIMARY KEY, data TEXT NOT NULL);
       CREATE TABLE projects(id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES participants(id), data TEXT NOT NULL);
       CREATE TABLE agents(id TEXT PRIMARY KEY, participant_id TEXT NOT NULL REFERENCES participants(id), data TEXT NOT NULL);
@@ -26,7 +31,9 @@ export function openDatabase(file: string) {
       CREATE INDEX events_project ON events(project_id,sequence);
       CREATE INDEX credentials_project ON credentials(project_id);
     `);
-    db.prepare('INSERT INTO migrations VALUES(1,?)').run(new Date().toISOString());
-  }).immediate();
+      db.prepare("INSERT INTO migrations VALUES(1,?)").run(
+        new Date().toISOString(),
+      );
+    }).immediate();
   return db;
 }
