@@ -1,14 +1,43 @@
 name: CI
-on:
-  push:
-  pull_request:
+on: [push, pull_request]
+permissions:
+  contents: read
 jobs:
-  smoke:
+  verify:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [22, 24]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
-      - run: node --check src/server.js
-      - run: node --check public/index.html || true
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run format:check
+      - run: npm test
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:web
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-evidence-node-${{ matrix.node }}
+          path: test-results/
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t agent-colab:ci .
+      - name: Container health and durable volume
+        run: |
+          docker volume create colab-ci
+          docker run -d --name colab-ci -e ADMIN_TOKEN=ci-admin-secret-at-least-32-characters -v colab-ci:/app/data -p 8787:8787 agent-colab:ci
+          for i in $(seq 1 30); do curl -fsS http://localhost:8787/health && break; sleep 2; done
+          curl -fsS http://localhost:8787/health
+          curl -fsS -X POST http://localhost:8787/api/projects -H 'Authorization: Bearer ci-admin-secret-at-least-32-characters' -H 'Idempotency-Key: persistence' -H 'Content-Type: application/json' -d '{"name":"CI persistence","goal":"Survive restart","public":true}'
+          docker restart colab-ci
+          for i in $(seq 1 30); do curl -fsS http://localhost:8787/health && break; sleep 2; done
+          curl -fsS http://localhost:8787/api/projects | python3 -c 'import json,sys; assert any(p["name"]=="CI persistence" for p in json.load(sys.stdin))'
