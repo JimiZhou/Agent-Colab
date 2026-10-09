@@ -5,6 +5,7 @@ Read README, SKILL, entire server, dashboard, Dockerfile and Compose. No AGENTS.
 `npm test`: succeeds with **zero tests**. `node --check src/server.js`: passes. Runtime Node 24.19.
 
 ## Findings
+
 - JSON: single-process promise queue serializes writes, tmp rename mitigates partial writes. No multi-process locking/transactions; failed promise poisons future saves; memory mutates before durable success.
 - Credentials: random bearer tokens stored plaintext; no expiry/revocation, scopes or participant identity. Admin is global environment credential.
 - Authorization: writes are project-scoped; reads expose all content publicly; task references unvalidated. No read-only membership. Public agent serialization correctly omits token.
@@ -16,6 +17,7 @@ Read README, SKILL, entire server, dashboard, Dockerfile and Compose. No AGENTS.
 - Docker: named data volume exists; no healthcheck, non-root user or dependency/build stage. SQLite portability not applicable yet.
 
 ## Phased implementation / P0
+
 1. TypeScript boundaries; SQLite WAL migrations, participants separate from agents, scoped hashed expiring credentials, transactional writes, idempotency, legacy import.
 2. Official SDK Streamable HTTP MCP tools/resources; authenticated, bounded, same core as REST.
 3. Public opt-in share page and discovery; private default; owner-issued participant-bound invitations; full skill and truthful harness instructions.
@@ -27,3 +29,7 @@ Read README, SKILL, entire server, dashboard, Dockerfile and Compose. No AGENTS.
 9. Automated core/API/MCP integration tests, deterministic A/B/C collaboration demo, CI, security checks and draft PR.
 
 Each phase is committed separately after its checks. P1: OAuth participant identity, cryptographic/Sybil-resistant independence, GitHub OAuth/webhooks, D1 adapter, hosted multi-instance storage, actual Codex/Claude live acceptance (requires installed clients and user-configured credentials).
+
+## Isolated baseline API runtime check
+
+Executed original baseline server against a temporary JSON file on port 8898. Anonymous snapshot GET returned 200 with Access-Control-Allow-Origin `*`; two agent approvals with no reproduction environment/evidence produced verified status. Original server was terminated and temporary state deleted. Replacement entrypoints preserve artifact/UI capabilities while deliberately tightening public reads and review contracts. Old unsafe entrypoints removed after replacement tests passed; original source remains at baseline SHA.
