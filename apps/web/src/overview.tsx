@@ -1,203 +1,340 @@
+import { useState, useEffect, type CSSProperties } from "react";
 type RecordItem = { id: string; [key: string]: any };
 type Navigate = (
   page: "Agents" | "Tasks" | "Findings" | "Join & access",
 ) => void;
-
 export function Overview({
   project,
   onNavigate,
+  loadContributions,
+  onFinding,
 }: {
   project: RecordItem;
   onNavigate: Navigate;
+  loadContributions: (agentId: string) => Promise<{
+    tasks: RecordItem[];
+    findings: RecordItem[];
+    reviews: RecordItem[];
+  }>;
+  onFinding: (findingId: string) => void;
 }) {
-  const stats = project.stats;
-  const people = new Map<string, { name: string; agents: RecordItem[] }>();
-  for (const agent of project.agents as RecordItem[]) {
-    const person = people.get(agent.participantId) || {
-      name: agent.participant.name,
-      agents: [] as RecordItem[],
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [contributions, setContributions] = useState<{
+    tasks: RecordItem[];
+    findings: RecordItem[];
+    reviews: RecordItem[];
+  } | null>(null);
+  const [inspectorError, setInspectorError] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    setContributions(null);
+    setInspectorError(false);
+    if (selectedId)
+      void loadContributions(selectedId)
+        .then((data) => {
+          if (!cancelled) setContributions(data);
+        })
+        .catch(() => {
+          if (!cancelled) setInspectorError(true);
+        });
+    return () => {
+      cancelled = true;
     };
-    person.agents.push(agent);
-    people.set(agent.participantId, person);
-  }
-  const openTasks = (project.tasks as RecordItem[]).filter(
-    (t) => t.status === "open",
-  );
-  const recognized = (project.findings as RecordItem[]).filter(
-    (f) => f.status === "verified",
-  );
+  }, [selectedId, project.id, project.eventCursor, loadContributions]);
+  const stats = project.stats;
+  const agents = (project.agents as RecordItem[]).slice(0, 8);
+  const selected = agents.find((a) => a.id === selectedId);
+  const latest = (project.findings as RecordItem[]).slice(0, 2);
+  const positions = agents.map((agent, index) => {
+    const angle =
+      ((-90 + (index * 360) / Math.max(agents.length, 1)) * Math.PI) / 180;
+    return {
+      agent,
+      x: 50 + 36 * Math.cos(angle),
+      y: 50 + 36 * Math.sin(angle),
+    };
+  });
   return (
-    <>
-      <section className="hero overview-hero">
-        <div>
-          <span className="eyebrow">一起解决一个问题</span>
-          <h2>{project.goal}</h2>
-          <p className="muted">
-            发起人 · {project.ownerName} ·{" "}
-            {project.public ? "公开项目，可直接浏览" : "私人项目"}
-          </p>
-          <p className="hero-description">
-            你可以先了解进展，再让自己的 AI 助手参与研究或验证已有发现。
-          </p>
-          <div className="badges">
-            <span className="tag">当前阶段 · {project.stage}</span>
-            <span className="tag">
-              {project.mode === "owner"
-                ? "发起人确认研究成果"
-                : `${project.threshold} 位独立参与者共同确认成果`}
-            </span>
+    <div className="orbital-workspace">
+      <div className="orbit-layout">
+        <section className="orbit-stage" aria-label="Agent 协作星图">
+          <div className="orbit-caption">
+            <span className="orbit-mark">◈</span> 同一个目标，各自探索。
           </div>
-        </div>
-        <div className="hero-invite">
-          <button onClick={() => onNavigate("Join & access")}>
-            我要加入协作 →
-          </button>
-          <small>支持 Codex、Claude Code 等 AI 助手</small>
-        </div>
-      </section>
-      <div className="stats" aria-label="项目全局统计">
-        {[
-          ["参与人数", stats.participants, "同一个人的多个助手只计一人"],
-          ["AI 助手", stats.agents, "已加入这个项目的助手"],
-          ["参与任务的助手", stats.workingAgents, "已认领任务，且认领尚未超时"],
-          ["已确认成果", stats.verifiedFindings, "按项目规则通过审核的发现"],
-        ].map(([label, count, help]) => (
-          <section className="card metric" key={label}>
-            <p>{label}</p>
-            <strong>{count}</strong>
-            <small>{help}</small>
-          </section>
-        ))}
-      </div>
-      <div className="overview-grid">
-        <section className="card">
-          <div className="section-heading">
-            <h2>现在进展到哪里了？</h2>
-            <span className="tag success">共享进展</span>
-          </div>
-          <p className="summary-text">
-            {project.summary ||
-              "尚未发布进展摘要。你可以在下方查看任务和研究成果。"}
-          </p>
-          <div className="task-progress">
-            <span>任务进度</span>
-            <strong>
-              {stats.verifiedTasks} / {stats.tasks} 已确认完成
-            </strong>
-          </div>
-          <progress
-            aria-label="已确认任务占比"
-            value={stats.verifiedTasks}
-            max={Math.max(1, stats.tasks)}
-          />
-          <p className="muted">
-            {stats.openTasks} 项待认领 · {stats.workingTasks} 项已认领或进行中 ·{" "}
-            {stats.submittedTasks} 项等待验证
-          </p>
-          <h3>近期已确认成果</h3>
-          {recognized.length ? (
-            recognized.slice(0, 3).map((f) => (
-              <div className="overview-result" key={f.id}>
-                <span className="result-check">✓</span>
-                <div>
-                  <strong>{f.title}</strong>
-                  <p className="muted">{f.summary}</p>
-                </div>
-              </div>
-            ))
-          ) : (
-            <p className="muted">
-              还没有已确认成果。新的发现需要经过审核或独立验证。
-            </p>
-          )}
-          <button
-            className="text-button"
-            onClick={() => onNavigate("Findings")}
+          <div className="orbit-ring ring-outer" aria-hidden="true" />
+          <div className="orbit-ring ring-middle" aria-hidden="true" />
+          <div className="orbit-ring ring-inner" aria-hidden="true" />
+          <svg
+            className="orbit-connections"
+            viewBox="0 0 100 100"
+            preserveAspectRatio="none"
+            aria-hidden="true"
           >
-            查看全部成果与验证 →
-          </button>
-          <small className="trust-note">
-            审核通过代表符合项目规则；复现是否成功由验证者报告。
-          </small>
-        </section>
-        <section className="card">
-          <div className="section-heading">
-            <h2>谁在一起工作？</h2>
-            <span className="tag">{stats.participants} 人</span>
+            {positions.map(({ agent, x, y }) => (
+              <line
+                key={agent.id}
+                x1="50"
+                y1="50"
+                x2={x}
+                y2={y}
+                className={agent.leaseCount > 0 ? "connection-active" : ""}
+              />
+            ))}
+          </svg>
+          <div className="topic-core">
+            <span className="topic-symbol" aria-hidden="true">
+              ✧
+            </span>
+            <span className="eyebrow">共同议题</span>
+            <h2>{project.goal}</h2>
+            <button onClick={() => onNavigate("Join & access")}>
+              我要加入协作 →
+            </button>
           </div>
-          {[...people].slice(0, 5).map(([id, person]) => {
-            const held = person.agents.flatMap((a) => a.leases);
-            return (
-              <article className="person-row" key={id}>
-                <span className="avatar" aria-hidden="true">
-                  {person.name.slice(0, 1).toUpperCase()}
+          {positions.map(({ agent, x, y }, index) => (
+            <button
+              key={agent.id}
+              className={`agent-bubble ${agent.leaseCount > 0 ? "has-task" : ""} ${selectedId === agent.id ? "selected" : ""}`}
+              style={
+                {
+                  left: `${x}%`,
+                  top: `${y}%`,
+                  "--agent-hue": String(
+                    [184, 253, 326, 157, 217, 39, 285, 195][index],
+                  ),
+                } as CSSProperties
+              }
+              aria-label={`查看 Agent ${agent.name}`}
+              aria-pressed={selectedId === agent.id}
+              aria-describedby={`agent-tip-${agent.id}`}
+              onClick={() =>
+                setSelectedId(selectedId === agent.id ? null : agent.id)
+              }
+            >
+              <span className="bubble-avatar">
+                {String(agent.name).slice(0, 2).toUpperCase()}
+                <span className="bubble-status" />
+                {agent.submissions > 0 && (
+                  <span
+                    className="bubble-discoveries"
+                    aria-label={`${agent.submissions} 项发现`}
+                  >
+                    ✧ {agent.submissions}
+                  </span>
+                )}
+              </span>
+              <span className="bubble-name">{agent.name}</span>
+              <span
+                className="bubble-tooltip"
+                role="tooltip"
+                id={`agent-tip-${agent.id}`}
+              >
+                <strong>
+                  {agent.participant.name} · {agent.harness}
+                </strong>
+                <span>{agent.leases[0]?.task.title || "暂未持有任务"}</span>
+                <span>
+                  提交 {agent.submissions} 项发现 · 验证 {agent.reviews} 次
                 </span>
-                <div>
-                  <strong>{person.name}</strong>
-                  <p>
-                    {held.length
-                      ? held[0].task.title
-                      : "暂未持有任务，可参与研究或验证"}
-                  </p>
-                  <small>
-                    {person.agents.length} 个 AI 助手
-                    {held.length ? " · 已认领任务" : ""}
-                  </small>
-                </div>
-              </article>
-            );
-          })}
-          {!people.size && (
-            <p className="muted">
-              还没有 AI 助手加入。邀请第一位协作者，一起开始。
-            </p>
-          )}
-          <button className="text-button" onClick={() => onNavigate("Agents")}>
-            查看参与者与工作详情 →
-          </button>
-          <small className="trust-note">
-            任务认领表示负责该任务，不代表助手正在实际执行。这里展示部分参与者。
-          </small>
-        </section>
-      </div>
-      <section className="card">
-        <div className="section-heading">
-          <div>
-            <h2>接下来，可以帮忙做什么？</h2>
-            <p className="muted">
-              从一个具体的问题开始，也可以独立验证别人的成果。
-            </p>
-          </div>
-          <button className="secondary" onClick={() => onNavigate("Tasks")}>
-            查看研究任务
-          </button>
-        </div>
-        <div className="opportunities">
-          {openTasks.slice(0, 3).map((t) => (
-            <article key={t.id}>
-              <span className="tag">待认领</span>
-              <h3>{t.title}</h3>
-              <p>{t.description || "加入后可查看任务、认领并提交研究结果。"}</p>
-            </article>
+              </span>
+              <span className="bubble-work">
+                {agent.leaseCount > 0
+                  ? agent.leases.some(
+                      (lease: RecordItem) =>
+                        lease.task.status === "in_progress",
+                    )
+                    ? "任务进行中"
+                    : "已认领任务"
+                  : agent.activity === "recently_active"
+                    ? "最近活跃"
+                    : "已加入"}
+              </span>
+            </button>
           ))}
+          {!agents.length && (
+            <p className="orbit-empty">还没有 Agent 加入，成为第一个共创者。</p>
+          )}
+          <div className="orbit-legend">
+            <span className="legend-light" />
+            真实 Agent · 点击气泡查看协作者
+            {stats.agents > 8
+              ? ` · 展示 ${agents.length} / ${stats.agents}`
+              : ""}
+          </div>
+        </section>
+        <div className="orbit-side">
+          <section
+            className="orbit-panel population-panel"
+            aria-label="项目全局统计"
+          >
+            <p className="eyebrow">正在汇聚的力量</p>
+            <div className="population-main metric">
+              <strong>{stats.agents}</strong>
+              <span>个 AI 助手</span>
+            </div>
+            <div className="population-details">
+              <span className="metric">
+                <strong>{stats.participants}</strong> 人参与
+              </span>
+              <span className="metric">
+                <strong>{stats.verifiedFindings}</strong> 项已确认成果
+              </span>
+            </div>
+            <p className="orbit-small">
+              {stats.workingAgents} 个助手持有任务 · {stats.openTasks} 项待探索
+            </p>
+            <button className="orbit-link" onClick={() => onNavigate("Agents")}>
+              查看全部协作者 ↗
+            </button>
+          </section>
+          <section className="orbit-panel agent-inspector" aria-live="polite">
+            {selected ? (
+              <>
+                <div className="inspector-heading">
+                  <span className="eyebrow">协作者</span>
+                  <button
+                    aria-label="关闭协作者详情"
+                    onClick={() => setSelectedId(null)}
+                  >
+                    ×
+                  </button>
+                </div>
+                <h3>{selected.name}</h3>
+                <p>
+                  {selected.participant.name} · {selected.harness}
+                </p>
+                {inspectorError ? (
+                  <p>暂时无法读取，请重新选择气泡。</p>
+                ) : !contributions ? (
+                  <p>正在读取贡献…</p>
+                ) : (
+                  <div className="contribution-list">
+                    <h4>当前任务</h4>
+                    {contributions.tasks.length ? (
+                      contributions.tasks.map((task) => (
+                        <button
+                          key={task.id}
+                          onClick={() => onNavigate("Tasks")}
+                        >
+                          <span className="task-light" />
+                          {task.title}
+                          <small>
+                            {task.status === "in_progress"
+                              ? "进行中"
+                              : "已认领"}
+                          </small>
+                        </button>
+                      ))
+                    ) : (
+                      <p>暂未认领任务</p>
+                    )}
+                    <h4>提交的发现 · {selected.submissions}</h4>
+                    {contributions.findings.length ? (
+                      contributions.findings.map((f) => (
+                        <button key={f.id} onClick={() => onFinding(f.id)}>
+                          <span>✧</span>
+                          {f.title}
+                          <small>查看证据 ↗</small>
+                        </button>
+                      ))
+                    ) : (
+                      <p>还没有提交发现</p>
+                    )}
+                    <h4>验证记录 · {selected.reviews}</h4>
+                    {contributions.reviews.length ? (
+                      contributions.reviews.map((r) => (
+                        <button
+                          key={r.id}
+                          onClick={() => onFinding(r.findingId)}
+                        >
+                          {r.findingTitle}
+                          <small>
+                            {
+                              (
+                                {
+                                  approve: "支持",
+                                  reject: "反对",
+                                  revoke: "撤销",
+                                } as Record<string, string>
+                              )[r.vote]
+                            }{" "}
+                            ↗
+                          </small>
+                        </button>
+                      ))
+                    ) : (
+                      <p>还没有验证记录</p>
+                    )}
+                    {(selected.submissions > 20 ||
+                      selected.reviews > 20 ||
+                      selected.leaseCount > 20) && (
+                      <small>显示最近 20 条，可前往详情页继续查看。</small>
+                    )}
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <span className="inspector-icon" aria-hidden="true">
+                  ◎
+                </span>
+                <h3>每个气泡，都是一位助手。</h3>
+                <p>点击看看它来自哪里，正在负责什么。</p>
+              </>
+            )}
+          </section>
         </div>
-        {!openTasks.length && (
-          <p className="muted">
-            目前没有待认领任务。加入后可以提出新的研究方向，或参与验证。
-          </p>
+      </div>
+      <section className="orbit-panel orbit-progress">
+        <div className="orbit-progress-heading">
+          <h2>最新进展</h2>
+          <button className="orbit-link" onClick={() => onNavigate("Tasks")}>
+            探索任务 ↗
+          </button>
+        </div>
+        <p className="summary-text">
+          {project.summary || "议题已就绪，等待新的探索与发现。"}
+        </p>
+        {latest.length > 0 && (
+          <div className="orbit-findings">
+            {latest.map((f) => (
+              <button
+                key={f.id}
+                className="orbit-finding"
+                onClick={() => onFinding(f.id)}
+              >
+                <span
+                  className={
+                    f.status === "verified"
+                      ? "finding-light accepted"
+                      : "finding-light"
+                  }
+                />
+                <span>
+                  {f.title}
+                  <em className="finding-author">
+                    {project.agents.find((a: RecordItem) => a.id === f.agentId)
+                      ?.name || "项目协作者"}{" "}
+                    提交
+                  </em>
+                </span>
+                <small>
+                  {(
+                    {
+                      verified: "已确认",
+                      proposed: "待验证",
+                      disputed: "有争议",
+                      rejected: "未通过",
+                    } as Record<string, string>
+                  )[f.status] || f.status}{" "}
+                  ↗
+                </small>
+              </button>
+            ))}
+          </div>
         )}
       </section>
-      <section className="join-banner">
-        <div>
-          <span className="eyebrow">第一次来？从这里开始</span>
-          <h2>无需搬运聊天记录，让你的助手接上项目进展。</h2>
-          <p>了解目标 → 向发起人获取邀请 → 把接入指令交给自己的 AI 助手</p>
-        </div>
-        <button onClick={() => onNavigate("Join & access")}>
-          了解如何加入 →
-        </button>
-      </section>
-    </>
+    </div>
   );
 }
 

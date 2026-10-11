@@ -93,15 +93,12 @@ test("new user follows share URL, sees real three-client consensus and complete 
   await expect(page.getByRole("heading", { name: p.goal })).toBeVisible();
   const metrics = page.getByLabel("项目全局统计");
   await expect(
-    metrics
-      .locator(".metric")
-      .filter({ hasText: "参与人数" })
-      .locator("strong"),
+    metrics.locator(".metric").filter({ hasText: "人参与" }).locator("strong"),
   ).toHaveText("3");
   await expect(
     metrics
       .locator(".metric")
-      .filter({ hasText: "已确认成果" })
+      .filter({ hasText: "项已确认成果" })
       .locator("strong"),
   ).toHaveText("1");
   await expect(page.getByLabel("Project credential")).toHaveCount(0);
@@ -109,6 +106,30 @@ test("new user follows share URL, sees real three-client consensus and complete 
   await expect(
     page.getByText("MCP Streamable HTTP", { exact: true }),
   ).toHaveCount(0);
+  await page.getByRole("button", { name: "查看 Agent A", exact: true }).hover();
+  await expect(
+    page.getByRole("tooltip").filter({ hasText: "提交 1 项发现" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "查看 Agent A", exact: true }).click();
+  const inspector = page.locator(".agent-inspector");
+  await expect(inspector.getByText("提交的发现 · 1")).toBeVisible();
+  await expect(
+    inspector.getByRole("button", { name: /Arithmetic is reproducible/ }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: "test-results/agent-interaction-desktop.png",
+    fullPage: true,
+  });
+  await inspector
+    .getByRole("button", { name: /Arithmetic is reproducible/ })
+    .click();
+  await expect(page.getByText("Original execution evidence")).toBeVisible();
+  await page.getByRole("button", { name: "项目总览", exact: true }).click();
+  await page.getByRole("button", { name: "查看 Agent B", exact: true }).click();
+  await expect(
+    page.locator(".agent-inspector").getByText("验证记录 · 1"),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "关闭协作者详情" }).click();
   await page.screenshot({
     path: "test-results/overview-desktop.png",
     fullPage: true,
@@ -161,8 +182,12 @@ test("new user follows share URL, sees real three-client consensus and complete 
     path: "test-results/evidence-desktop.png",
     fullPage: true,
   });
+  await page.locator(".more-menu summary").click();
   await page.getByRole("button", { name: "技术接入", exact: true }).click();
-  await expect(page.getByText("Bring your own harness.")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "连接你的 AI 助手" }),
+  ).toBeVisible();
+  await page.getByText("协议与同步详情", { exact: true }).click();
   await expect(
     page.getByText("http://127.0.0.1:8799/mcp", { exact: true }),
   ).toBeVisible();
@@ -294,6 +319,7 @@ test("owner updates real summary, creates and operates a lease, links GitHub cod
   await expect(page.getByRole("status")).toContainText("Saved");
   await task.getByRole("button", { name: "release", exact: true }).click();
   await expect(task).toContainText("open");
+  await page.locator(".more-menu summary").click();
   await page.getByRole("button", { name: "项目管理", exact: true }).click();
   await page
     .getByLabel("Agent name", { exact: true })
@@ -312,4 +338,118 @@ test("owner updates real summary, creates and operates a lease, links GitHub cod
     headers: { Authorization: "Bearer " + owner.token },
   });
   expect((await credentials.json()).length).toBe(2);
+});
+
+test("open dashboard receives another participant's progress without a refresh", async ({
+  page,
+  request,
+}) => {
+  const headers = {
+    Authorization: "Bearer " + admin,
+    "Idempotency-Key": crypto.randomUUID(),
+  };
+  const created = await request.post("/api/projects", {
+    headers,
+    data: {
+      name: "Live shared progress",
+      goal: "See updates as they happen",
+      public: true,
+    },
+  });
+  const project = await created.json();
+  await page.goto(`/p/${project.id}`);
+  await expect(page.getByText("进展实时同步中", { exact: true })).toBeVisible();
+  const changed = await request.patch(`/api/projects/${project.id}`, {
+    headers: { ...headers, "Idempotency-Key": crypto.randomUUID() },
+    data: { summary: "Another participant just published this result" },
+  });
+  expect(changed.ok()).toBeTruthy();
+  await expect(
+    page.getByText("Another participant just published this result", {
+      exact: true,
+    }),
+  ).toBeVisible({ timeout: 5000 });
+  const post = async (path: string, data: unknown, token = admin) => {
+    const r = await request.post(path, {
+      headers: {
+        Authorization: "Bearer " + token,
+        "Idempotency-Key": crypto.randomUUID(),
+      },
+      data,
+    });
+    expect(r.ok()).toBeTruthy();
+    return r.json();
+  };
+  const agent = await post(`/api/projects/${project.id}/join`, {
+    name: "Aster",
+    participantName: "Orbit researcher",
+  });
+  const task = await post(
+    `/api/projects/${project.id}/tasks`,
+    { title: "Explore the shared question" },
+    agent.token,
+  );
+  await post(
+    `/api/projects/${project.id}/tasks/${task.id}/claim`,
+    {},
+    agent.token,
+  );
+  const bubble = page.getByRole("button", {
+    name: "查看 Agent Aster",
+    exact: true,
+  });
+  await expect(bubble).toHaveClass(/has-task/, { timeout: 5000 });
+  await bubble.hover();
+  await expect(
+    page
+      .getByRole("tooltip")
+      .filter({ hasText: "Explore the shared question" }),
+  ).toBeVisible();
+  await bubble.click();
+  await expect(
+    page
+      .locator(".agent-inspector")
+      .getByRole("button", { name: /Explore the shared question/ }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: "test-results/agent-working-desktop.png",
+    fullPage: true,
+  });
+  await post(
+    `/api/projects/${project.id}/findings`,
+    {
+      taskId: task.id,
+      title: "New orbital finding",
+      summary: "Visible to everyone",
+      direction: "Live coordination",
+      method: "Independent run",
+      evidence: [{ description: "Real orbital evidence" }],
+      reproduction: "Run deterministic collaboration",
+    },
+    agent.token,
+  );
+  await expect(bubble).not.toHaveClass(/has-task/, { timeout: 5000 });
+  await expect(bubble.locator(".bubble-discoveries")).toContainText("1");
+  await expect(
+    page
+      .locator(".agent-inspector")
+      .getByRole("button", { name: /New orbital finding/ }),
+  ).toBeVisible({ timeout: 5000 });
+  await expect(page.locator(".finding-author")).toContainText("Aster 提交");
+  for (let i = 2; i <= 8; i++)
+    await post(`/api/projects/${project.id}/join`, {
+      name: `Collaborator ${i}`,
+      participantName: `Human ${i}`,
+    });
+  await expect(page.locator(".agent-bubble")).toHaveCount(8, { timeout: 5000 });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({
+    path: "test-results/agent-interaction-mobile.png",
+    fullPage: true,
+  });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBeTruthy();
 });

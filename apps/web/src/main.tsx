@@ -2,6 +2,11 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
 import { Overview, JoinGuide } from "./overview";
+import { ConnectionGuide } from "./connection";
+import {
+  watchProjectEvents,
+  type SyncStatus,
+} from "../../../packages/sdk/src/events";
 type Item = { id: string; [key: string]: any };
 const tabs = [
   "Overview",
@@ -54,6 +59,9 @@ function App() {
     [busy, setBusy] = useState(false),
     [extraTasks, setExtraTasks] = useState<Item[] | null>(null),
     [extraFindings, setExtraFindings] = useState<Item[] | null>(null);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>("connecting");
+  const detailRef = useRef(detail);
+  detailRef.current = detail;
   const currentScope = useRef({ token, id });
   currentScope.current = { token, id };
   const request = useCallback(
@@ -122,6 +130,7 @@ function App() {
   }, [id, token, request]);
   useEffect(() => {
     setProject(null);
+    setSyncStatus("connecting");
     setDetail(null);
     setExtraTasks(null);
     setExtraFindings(null);
@@ -129,9 +138,70 @@ function App() {
     setInvite(null);
     setCredentials([]);
     void reload();
-    const timer = setInterval(() => void reload(), 15000);
+    const timer = setInterval(() => void reload(), 60000);
     return () => clearInterval(timer);
   }, [reload]);
+  const connectedProject = project?.id;
+  useEffect(() => {
+    if (!connectedProject) return;
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let refreshing = false;
+    let dirty = false;
+    const refresh = async () => {
+      if (refreshing) {
+        dirty = true;
+        return;
+      }
+      refreshing = true;
+      do {
+        dirty = false;
+        await reload();
+        if (controller.signal.aborted) break;
+        setExtraTasks(null);
+        setExtraFindings(null);
+        const finding = detailRef.current;
+        if (finding) {
+          try {
+            const next = await request(
+              `/api/projects/${id}/findings/${finding.id}`,
+            );
+            if (
+              !controller.signal.aborted &&
+              detailRef.current?.id === finding.id
+            )
+              setDetail(next);
+          } catch {
+            /* Snapshot refresh handles access loss. */
+          }
+        }
+      } while (dirty && !controller.signal.aborted);
+      refreshing = false;
+    };
+    void (async () => {
+      try {
+        for await (const event of watchProjectEvents("", connectedProject, {
+          token,
+          after: project?.eventCursor ?? 0,
+          signal: controller.signal,
+          onStatus: setSyncStatus,
+        })) {
+          if (controller.signal.aborted) break;
+          clearTimeout(timer);
+          timer = setTimeout(() => void refresh(), 100);
+        }
+      } catch {
+        if (!controller.signal.aborted) {
+          setSyncStatus("stopped");
+          void reload();
+        }
+      }
+    })();
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [connectedProject, token, id, reload, request]);
   useEffect(() => {
     if (!id || !["Join & access", "Connection", "Settings"].includes(tab))
       return;
@@ -172,6 +242,11 @@ function App() {
   };
   const action = (path: string, body: unknown = {}) =>
     act(() => request(`/api/projects/${id}/${path}`, body));
+  const getAgentContributions = useCallback(
+    (agentId: string) =>
+      request(`/api/projects/${id}/agents/${agentId}/contributions?limit=20`),
+    [id, request],
+  );
   const findings = extraFindings || project?.findings || [],
     tasks = extraTasks || project?.tasks || [],
     agents = project?.agents || [];
@@ -214,7 +289,9 @@ function App() {
   }, []);
   // Pagination is user-directed; overview always returns a bounded snapshot.
   return (
-    <div className="shell">
+    <div
+      className={`shell compact-shell ${tab === "Overview" && project ? "orbit-shell" : ""}`}
+    >
       <aside>
         <a className="brand" href="/">
           ◈{" "}
@@ -246,26 +323,35 @@ function App() {
             </option>
           ))}
         </select>
-        <nav>
-          {tabs.map((t, index) => (
-            <React.Fragment key={t}>
-              {index === 6 && <span className="nav-divider">高级设置</span>}
-              <button
-                key={t}
-                className={tab === t ? "active" : ""}
-                onClick={() => navigate(t)}
-                aria-current={tab === t ? "page" : undefined}
-              >
-                {labels[tabs.indexOf(t)]}
-              </button>
-            </React.Fragment>
+        <nav aria-label="项目导航">
+          {tabs.slice(0, 4).map((t) => (
+            <button
+              key={t}
+              className={tab === t ? "active" : ""}
+              onClick={() => navigate(t)}
+              aria-current={tab === t ? "page" : undefined}
+            >
+              {labels[tabs.indexOf(t)]}
+            </button>
           ))}
+          <details className="more-menu">
+            <summary>更多</summary>
+            <div>
+              {tabs.slice(4).map((t) => (
+                <button
+                  key={t}
+                  className={tab === t ? "active" : ""}
+                  onClick={(e) => {
+                    navigate(t);
+                    e.currentTarget.closest("details")?.removeAttribute("open");
+                  }}
+                >
+                  {labels[tabs.indexOf(t)]}
+                </button>
+              ))}
+            </div>
+          </details>
         </nav>
-        <div className="sidebar-note">
-          <span className="dot" /> 共享协作空间
-          <p>大家使用自己的 AI 助手，在这里共享进展与证据。</p>
-          <span className="tag">MVP v0.2</span>
-        </div>
       </aside>
       <main>
         <header>
@@ -278,8 +364,15 @@ function App() {
               刷新
             </button>
           </div>
-          <p className="muted">
-            每个人带上自己的 AI 助手，一起研究、分享发现、验证结果。
+          <p className="sync-state" aria-live="polite">
+            <span className={syncStatus === "live" ? "dot" : "dot waiting"} />
+            {syncStatus === "live"
+              ? "进展实时同步中"
+              : syncStatus === "reconnecting"
+                ? "连接恢复中，将自动补齐进展"
+                : syncStatus === "stopped"
+                  ? "同步已暂停，请检查访问权限"
+                  : "正在连接共享进展"}
           </p>
         </header>
         {(tab === "Connection" ||
@@ -398,13 +491,34 @@ function App() {
           <>
             {tab === "Overview" && (
               <>
-                <Overview project={project} onNavigate={navigate} />
+                <Overview
+                  project={project}
+                  onNavigate={navigate}
+                  loadContributions={getAgentContributions}
+                  onFinding={(findingId) => {
+                    navigate("Findings");
+                    setDetail(null);
+                    void request(`/api/projects/${id}/findings/${findingId}`)
+                      .then(setDetail)
+                      .catch((e) => setError(e.message));
+                  }}
+                />
               </>
             )}
             {tab === "Settings" && (
               <>
                 <section className="card">
                   <h2>Update project context</h2>
+                  <p>
+                    发起人：{project.ownerName} ·{" "}
+                    {project.mode === "owner"
+                      ? "由发起人或授权审核者确认成果"
+                      : `由 ${project.threshold} 位独立参与者确认成果`}
+                  </p>
+                  <p className="muted">
+                    当前阶段：{project.stage}
+                    。成果认可与独立复现分开记录，证据和验证结果可在研究成果页查看。
+                  </p>
                   <form
                     onSubmit={(e) => {
                       const v = formValues(e);
@@ -829,65 +943,11 @@ function App() {
               />
             )}
             {tab === "Connection" && (
-              <>
-                <section className="hero">
-                  <span className="eyebrow">JOIN WITH YOUR AGENT</span>
-                  <h2>Bring your own harness.</h2>
-                  <p>
-                    Give your agent this project link, the collaboration skill,
-                    and a separately delivered credential. Approve the necessary
-                    local MCP configuration and execution permissions.
-                  </p>
-                  <p>
-                    <a href={"/p/" + id}>
-                      {discovery?.shareUrl || location.origin + "/p/" + id}
-                    </a>
-                  </p>
-                  <button
-                    onClick={() =>
-                      void navigator.clipboard
-                        .writeText(discovery?.joinInstruction || "")
-                        .then(() => setNotice("Join instructions copied."))
-                        .catch(() =>
-                          setError(
-                            "Clipboard unavailable; copy the instructions below.",
-                          ),
-                        )
-                    }
-                  >
-                    Copy agent instructions
-                  </button>
-                  <pre>{discovery?.joinInstruction}</pre>
-                </section>
-                <div className="two-col">
-                  <section className="card">
-                    <h2>Connection details</h2>
-                    <p>MCP Streamable HTTP</p>
-                    <code>{discovery?.mcpEndpoint}</code>
-                    <p>Authorization: Bearer &lt;your credential&gt;</p>
-                    <p>
-                      REST fallback: <code>{discovery?.restEndpoint}</code>
-                    </p>
-                    <a href="/skill.md" target="_blank" rel="noreferrer">
-                      Read collaboration Skill ↗
-                    </a>
-                    <p className="muted">
-                      Official SDK integration tested. Codex and Claude Code
-                      configurations documented; live harness acceptance
-                      pending. Tokens must never enter URLs or tracked config.
-                    </p>
-                    <h3>Codex configuration</h3>
-                    <pre>{`[mcp_servers.agent_colab]\nurl = "${discovery?.mcpEndpoint || ""}"\nbearer_token_env_var = "AGENT_COLAB_TOKEN"`}</pre>
-                    <h3>Claude Code configuration</h3>
-                    <pre>{`claude mcp add-json --scope local agent-colab '{"type":"http","url":"${discovery?.mcpEndpoint || ""}","headers":{"Authorization":"Bearer \${AGENT_COLAB_TOKEN}"}}' `}</pre>
-                    <p className="muted">
-                      Keep the environment reference literal with single quotes.
-                      Configure the token privately before launch; see README
-                      for details.
-                    </p>
-                  </section>
-                </div>
-              </>
+              <ConnectionGuide
+                projectId={id}
+                endpoint={discovery?.mcpEndpoint || location.origin + "/mcp"}
+                instruction={discovery?.joinInstruction || ""}
+              />
             )}
             {tab === "Settings" && (
               <>
@@ -1100,8 +1160,7 @@ function App() {
               </section>
             )}
             <footer>
-              Agent-Colab v0.2 · 展示真实共享进展，每 15 秒自动更新 ·
-              研究内容由参与者提供
+              Agent-Colab v0.2 · 共享进展自动同步 · 研究内容由参与者提供
             </footer>
           </>
         )}
