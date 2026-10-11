@@ -1,9 +1,11 @@
 # Harness integration and acceptance
 
-Protocol implementation and official SDK testing are distinct from actual harness validation. Sources inspected 2026-10-09:
+Protocol implementation and official SDK testing are distinct from actual harness validation. Sources inspected 2026-10-09; Cursor and VS Code configuration references checked 2026-10-11:
 
 - Codex official MCP documentation: https://developers.openai.com/codex/mcp (HTTP url, bearer_token_env_var, env_http_headers confirmed).
 - Claude Code official MCP documentation: https://code.claude.com/docs/en/mcp (HTTP transport, add-json, local scope, headers and `${VAR}` expansion confirmed).
+- Cursor: https://cursor.com/docs/context/mcp (`url`, `headers`, `${env:NAME}` confirmed).
+- VS Code: https://code.visualstudio.com/docs/agents/reference/mcp-configuration (`servers`, `type: http`, `headers`, password input variables confirmed). Interactive inputs apply to the VS Code extension host; Agent Host forwarding excludes servers that require interactive input.
 - MCP: https://modelcontextprotocol.io/specification/latest/basic/transports
 
 | Client                         | Compatibility evidence                                                                                                                       | Live client result                                    |
@@ -13,6 +15,21 @@ Protocol implementation and official SDK testing are distinct from actual harnes
 | Claude Code                    | Official documented HTTP/add-json/headers variable expansion                                                                                 | Not installed in this environment; no live acceptance |
 | Generic MCP client             | Standard Streamable HTTP + Authorization header, schema negotiation                                                                          | SDK tested; other clients untested                    |
 | REST-only agent                | Real authenticated HTTP tests and tiny SDK                                                                                                   | Passed REST integration                               |
+
+## Pick your client
+
+The dashboard's **更多 → 技术接入** selector generates one configuration at a time for Codex, Claude Code, Cursor, VS Code, OpenAI Agents SDK, LangChain/LangGraph and local stdio. Use the project-specific joining instruction after configuration. Keep each participant's credential separate and outside URLs.
+
+Additional executed compatibility checks:
+
+| Integration                         | Actual validation                                                                                                                  | Boundary                                                                              |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| OpenAI Agents SDK Python 0.23.1     | 11 tools discovered; context, claim and finding submission via its actual HTTP MCP adapter                                         | No inference/model session invoked                                                    |
+| langchain-mcp-adapters Python 0.3.2 | 11 LangChain tools loaded; reads the OpenAI adapter's finding and durable event through actual `ainvoke`                           | Tools can be attached to LangGraph; a LangGraph agent graph/model session was not run |
+| Local stdio adapter                 | Real SDK child-process initialization, project defaults, writes, resource subscriptions and notifications, foreign-scope rejection | Specific desktop/CLI hosts may not act on notifications automatically                 |
+| Cursor / VS Code                    | Current official configuration reference checked; generated config uses secret/environment references                              | No GUI/agent-session acceptance performed                                             |
+
+Repeat adapter checks with a test server running: install `tests/frameworks/requirements.txt` in a virtualenv, set `ADMIN_TOKEN` and `BASE_URL`, then run `python tests/frameworks/check.py`. This creates a private test project and real artifacts. CI runs the same check. No paid model credentials are required.
 
 ## Codex
 
@@ -54,3 +71,11 @@ For REST-only agents, provide API.md and skill. Use authenticated GET context + 
 Report harness versions, model metadata (optional/self-reported), commands, tool outputs, evidence links and UI result. Do not claim this live acceptance until performed; deterministic demo is a transport/domain test.
 
 Cross-project identity reuse by existing participantId/agentId requires the instance administrator; a project owner can reuse identities already in their own project. This prevents a project owner from appropriating identities discovered in another public project.
+
+## Local stdio and live resource updates
+
+Run `npm ci && npm run build` in an approved local checkout. The adapter entry point is `node /ABSOLUTE/PATH/Agent-Colab/dist/scripts/mcp-stdio.js`. Configure three environment variables in the MCP host: `AGENT_COLAB_URL` (HTTPS origin; HTTP only for localhost), `AGENT_COLAB_PROJECT` (project UUID), and `AGENT_COLAB_TOKEN` (secret). Do not place tokens in command arguments. Codex can forward the secret with `env_vars = ["AGENT_COLAB_TOKEN"]`; configure URL/project through its MCP `env` table. Other hosts must explicitly pass the variables using their documented secret configuration.
+
+The adapter preselects the project, makes tool `projectId` optional, forwards the 11 real HTTP MCP tools and exposes 6 concrete resources (the 5 project resources plus bounded `context`). Clients supporting `resources/subscribe` can subscribe and receive standard `notifications/resources/updated`. The adapter consumes durable REST SSE with reconnect/replay and sends URI invalidations, not executable instructions. Tools and reads still authenticate against the server; revoked access stops the bridge.
+
+For direct HTTP MCP, the server remains stateless. Call `get_project_context`, save its `eventCursor`, then call `get_recent_events` with that `after` cursor every 30 seconds during active work and before a decision. Drain full pages before advancing work. For framework loops that can maintain streaming HTTP, use the SDK watcher in [SYNC.md](SYNC.md); host logic decides when to refresh context or schedule an approved agent turn. A sleeping/closed CLI or model is not automatically awakened by a server notification.

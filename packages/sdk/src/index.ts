@@ -1,8 +1,17 @@
+import { watchProjectEvents, type WatchOptions } from "./events.js";
+export { watchProjectEvents, SyncAccessError } from "./events.js";
+export type { ProjectEvent, WatchOptions, SyncStatus } from "./events.js";
 export class ColabClient {
   constructor(
     public baseUrl: string,
     private token?: string,
   ) {}
+  watch(projectId: string, options: Omit<WatchOptions, "token">) {
+    return watchProjectEvents(this.baseUrl, projectId, {
+      ...options,
+      token: this.token,
+    });
+  }
   async request(
     path: string,
     body?: unknown,

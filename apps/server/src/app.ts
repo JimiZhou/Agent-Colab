@@ -132,7 +132,18 @@ export function createApp(
       mcpEndpoint: baseUrl + "/mcp",
       skillUrl: baseUrl + "/skill.md",
       restEndpoint: baseUrl + "/api/projects/" + id,
-      joinInstruction: `Read ${baseUrl}/skill.md. Connect MCP at ${baseUrl}/mcp using your owner-issued Bearer credential from a secure channel. Fetch get_project_context for ${id}; choose an open task or independent review. Obtain local execution permission before running code.`,
+      joinInstruction: `Read ${baseUrl}/skill.md. Connect MCP at ${baseUrl}/mcp using your owner-issued Bearer credential from a secure channel. Fetch get_project_context for ${id}; save eventCursor and choose an open task or independent review. Subscribe to the authenticated SSE events URL or call get_recent_events with the last applied sequence every 30 seconds while working and before shared-state decisions; drain full pages. Refresh only changed context. Obtain local execution permission before running code.`,
+      sync: {
+        eventsUrl: baseUrl + "/api/projects/" + id + "/events/stream",
+        transport: "SSE",
+        cursor: "Last-Event-ID or after",
+        pollTool: "get_recent_events",
+        recommendedPollSeconds: 30,
+        expectedDeliverySeconds: 1,
+        delivery: "durable replay; resume after last applied sequence",
+        agentWakeup:
+          "Client/harness must implement subscriptions or polling; notifications do not automatically run a model",
+      },
       credentialDelivery:
         "Owner issues token separately; never place it in URLs. MCP installation/configuration requires harness authorization.",
       compatibility: {
@@ -215,6 +226,16 @@ export function createApp(
   app.post("/api/projects/:id/repositories", (req, res) =>
     write(req, res, (a) => c.repository(a, projectId(req), req.body)),
   );
+  app.get("/api/projects/:id/agents/:agentId/contributions", (req, res) =>
+    res.json(
+      c.contributions(
+        actor(req),
+        projectId(req),
+        String(req.params.agentId),
+        req.query,
+      ),
+    ),
+  );
   app.get("/api/projects/:id/agents", (req, res) =>
     res.json(c.agents(actor(req), projectId(req))),
   );
@@ -234,17 +255,27 @@ export function createApp(
       "Content-Type": "text/event-stream",
       Connection: "keep-alive",
       "X-Accel-Buffering": "no",
+      "Cache-Control": "no-cache, no-transform",
     });
     res.flushHeaders();
     const tick = () => {
       try {
+        if (res.writableLength > 256 * 1024) {
+          res.destroy();
+          return;
+        }
         a = actor(req);
+        c.authorize(a, id);
+        c.expire(id);
         const events = c.events(a, id, { after, limit: 100 });
         for (const e of events) {
           after = e.sequence;
-          res.write(
-            `id: ${e.sequence}\nevent: activity\ndata: ${JSON.stringify(e)}\n\n`,
-          );
+          if (
+            !res.write(
+              `id: ${e.sequence}\nevent: activity\ndata: ${JSON.stringify(e)}\n\n`,
+            )
+          )
+            break;
         }
         res.write(": heartbeat\n\n");
       } catch {
@@ -252,7 +283,7 @@ export function createApp(
       }
     };
     tick();
-    const timer = setInterval(tick, 2000);
+    const timer = setInterval(tick, 1000);
     req.on("close", () => clearInterval(timer));
   });
   app.post("/mcp", async (req, res) => {

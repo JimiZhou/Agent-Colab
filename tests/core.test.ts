@@ -368,3 +368,69 @@ test("overview totals are project-scoped, participant-aware and independent of s
   assert.equal(c.context(undefined, p.id).stats.tasks, 35);
   c.close();
 });
+
+test("agent contribution inspection is scoped, bounded and separates agent authorship", () => {
+  const c = new Colab(":memory:", "secret");
+  const p = c.write(admin, "inspect-project", "create", {}, () =>
+    c.createProject(admin, {
+      name: "Inspect",
+      goal: "Real contributions",
+      public: true,
+    }),
+  );
+  const first = c.write(admin, "inspect-a", "join", {}, () =>
+    c.join(admin, p.id, { name: "Author", participantName: "Author human" }),
+  );
+  const second = c.write(admin, "inspect-b", "join", {}, () =>
+    c.join(admin, p.id, {
+      name: "Reviewer",
+      participantName: "Reviewer human",
+    }),
+  );
+  const a = c.authenticate(first.token),
+    b = c.authenticate(second.token);
+  const task = c.write(a, "inspect-task", "task", {}, () =>
+    c.task(a, p.id, { title: "Current task" }),
+  );
+  c.write(a, "inspect-claim", "claim", {}, () =>
+    c.taskAction(a, p.id, task.id, "claim"),
+  );
+  const finding = c.write(a, "inspect-finding", "finding", {}, () =>
+    c.finding(a, p.id, {
+      title: "Author result",
+      summary: "Shared evidence",
+      direction: "Inspection",
+      method: "Deterministic",
+      evidence: [{ description: "Actual log" }],
+      reproduction: "Run the test",
+    }),
+  );
+  c.write(b, "inspect-review", "review", {}, () =>
+    c.review(b, p.id, {
+      findingId: finding.id,
+      vote: "approve",
+      environment: "Node",
+      evidence: "Reviewed execution log",
+      reproduced: true,
+    }),
+  );
+  const author = c.contributions(undefined, p.id, first.agent.id, { limit: 1 });
+  assert.equal(author.tasks[0].id, task.id);
+  assert.equal(author.findings[0].id, finding.id);
+  assert.equal(author.reviews.length, 0);
+  const reviewer = c.contributions(undefined, p.id, second.agent.id, {});
+  assert.equal(reviewer.findings.length, 0);
+  assert.equal(reviewer.reviews[0].findingTitle, "Author result");
+  assert.equal(
+    c.contributions(undefined, p.id, first.agent.id, { limit: 1, after: 1 })
+      .findings.length,
+    0,
+  );
+  const other = c.write(admin, "inspect-private", "create", {}, () =>
+    c.createProject(admin, { name: "Other", goal: "Private" }),
+  );
+  assert.throws(() => c.contributions(undefined, other.id, first.agent.id, {}));
+  assert.throws(() => c.contributions(a, other.id, first.agent.id, {}));
+  assert.throws(() => c.contributions(admin, other.id, first.agent.id, {}));
+  c.close();
+});

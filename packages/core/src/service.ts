@@ -808,10 +808,57 @@ export class Colab {
         };
       });
   }
+  contributions(
+    actor: Actor | undefined,
+    projectId: string,
+    agentId: string,
+    input: unknown = {},
+  ) {
+    this.authorize(actor, projectId);
+    const enrolled = this.db
+      .prepare(
+        "SELECT 1 FROM agents a JOIN memberships m ON m.participant_id=a.participant_id WHERE a.id=? AND m.project_id=? AND (EXISTS (SELECT 1 FROM credentials cr WHERE cr.agent_id=a.id AND cr.project_id=m.project_id) OR json_extract(a.data,'$.legacyProjectId')=m.project_id)",
+      )
+      .get(agentId, projectId);
+    if (!enrolled)
+      throw new AppError(404, "NOT_FOUND", "Agent not found in project");
+    this.expire(projectId);
+    const { limit, after } = pageSchema.parse(input);
+    return {
+      tasks: this.db
+        .prepare(
+          "SELECT t.data FROM tasks t JOIN leases l ON l.task_id=t.id WHERE t.project_id=? AND l.agent_id=? ORDER BY t.rowid DESC LIMIT ? OFFSET ?",
+        )
+        .all(projectId, agentId, limit, after)
+        .map(parse),
+      findings: this.db
+        .prepare(
+          "SELECT data FROM findings WHERE project_id=? AND json_extract(data,'$.agentId')=? ORDER BY rowid DESC LIMIT ? OFFSET ?",
+        )
+        .all(projectId, agentId, limit, after)
+        .map(parse)
+        .map((f) => this.findingSummary(f)),
+      reviews: this.db
+        .prepare(
+          "SELECT r.data, json_extract(f.data,'$.title') title FROM reviews r JOIN findings f ON f.id=r.finding_id WHERE f.project_id=? AND json_extract(r.data,'$.agentId')=? ORDER BY r.rowid DESC LIMIT ? OFFSET ?",
+        )
+        .all(projectId, agentId, limit, after)
+        .map((r: any) => ({ ...parse(r), findingTitle: r.title })),
+      limit,
+      after,
+    };
+  }
   context(actor: Actor | undefined, projectId: string): RecordData {
     this.authorize(actor, projectId);
     this.expire(projectId);
     return {
+      eventCursor: (
+        this.db
+          .prepare(
+            "SELECT coalesce(max(sequence),0) n FROM events WHERE project_id=?",
+          )
+          .get(projectId) as { n: number }
+      ).n,
       ...this.get("projects", projectId),
       ownerName: this.get(
         "participants",
