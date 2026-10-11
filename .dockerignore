@@ -1,0 +1,9 @@
+node_modules
+dist
+apps/web/dist
+.git
+data
+.env
+*.sqlite*
+test-results
+playwright-report

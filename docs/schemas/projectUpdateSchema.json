@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "goal": { "type": "string", "minLength": 1, "maxLength": 8000 },
+    "summary": { "type": "string", "maxLength": 8000 },
+    "stage": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "public": { "type": "boolean" }
+  },
+  "additionalProperties": false
+}

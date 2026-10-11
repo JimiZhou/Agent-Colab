@@ -1,12 +1,33 @@
 services:
   agent-colab:
+    image: agent-colab:local
     build: .
+    restart: unless-stopped
     ports:
-      - "8787:8787"
+      - "127.0.0.1:8787:8787"
     environment:
-      ADMIN_TOKEN: ${ADMIN_TOKEN:?Set ADMIN_TOKEN}
-      DATA_FILE: /app/data/state.json
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?Set ADMIN_TOKEN (32+ characters)}
+      BASE_URL: ${BASE_URL:-http://localhost:8787}
+      DATABASE_FILE: /app/data/colab.sqlite
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
     volumes:
       - agent_colab_data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    profiles: [tunnel]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+    depends_on:
+      agent-colab:
+        condition: service_healthy
 volumes:
   agent_colab_data:
